@@ -1,6 +1,6 @@
 package com.e_commerce.e_commerce_back.services.interfaces;
 
-import com.e_commerce.e_commerce_back.dto.CreateAccountDTO;
+import com.e_commerce.e_commerce_back.dto.CreateUserDTO;
 
 public interface AccountService {
 
@@ -9,6 +9,6 @@ public interface AccountService {
      * @param cuenta
      * @return
      */
-    String createAccount(CreateAccountDTO cuenta);
+    String createAccount(CreateUserDTO cuenta);
 
 }

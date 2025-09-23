@@ -28,6 +28,11 @@ public class User {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @NotBlank(message = "El número de identificación es obligatorio")
+    @Size(min = 2, max = 15, message = "El número de identificación debe tener entre 2 y 15 caracteres")
+    @Column(name = "id_number", nullable = false, length = 15)
+    private String idNumber;
     
     @NotBlank(message = "El nombre es obligatorio")
     @Size(min = 2, max = 50, message = "El nombre debe tener entre 2 y 50 caracteres")
