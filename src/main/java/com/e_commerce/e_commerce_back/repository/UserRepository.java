@@ -5,7 +5,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import com.e_commerce.e_commerce_back.entity.Role;
 import com.e_commerce.e_commerce_back.entity.User;
 import java.util.Optional;
 import java.util.List;
@@ -26,14 +25,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Buscar por token de verificación
     Optional<User> findByVerificationToken(String token);
     
-    // Buscar por token de reset de password
-    Optional<User> findByResetPasswordToken(String token);
+    // Buscar usuarios activos (usando status y emailVerified)
+    @Query("SELECT u FROM User u WHERE u.status = 'ACTIVE' AND u.emailVerified = true")
+    List<User> findActiveUsers();
     
-    // Buscar usuarios activos
-    List<User> findByEnabledTrue();
-    
-    // Buscar por rol
-    List<User> findByRole(Role role);
+    // Buscar por rol (usando EnumRole)
+    @Query("SELECT u FROM User u WHERE u.role = :role")
+    List<User> findByRole(@Param("role") com.e_commerce.enums.EnumRole role);
     
     // Buscar usuarios con email verificado
     List<User> findByEmailVerifiedTrue();

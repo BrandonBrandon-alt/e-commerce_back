@@ -1,132 +1,237 @@
 package com.e_commerce.e_commerce_back.entity;
 
 import jakarta.persistence.*;
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
-import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.UpdateTimestamp;
+import jakarta.validation.constraints.*;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
 
-import com.e_commerce.e_commerce_back.entity.Role;
+import com.e_commerce.enums.EnumStatus;
+import com.e_commerce.enums.EnumRole;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Period;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 @Entity
-@Table(name = "users")
+@Table(name = "users", indexes = {
+    @Index(name = "idx_user_email", columnList = "email"),
+    @Index(name = "idx_user_id_number", columnList = "id_number"),
+    @Index(name = "idx_user_status_role", columnList = "status, role"),
+    @Index(name = "idx_user_created_at", columnList = "created_at")
+})
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class User {
+@SuperBuilder
+@ToString(exclude = {"password", "token", "verificationToken", "codeActivation", "codeResetPassword", "orders", "addresses", "cart"})
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
+public class User extends BaseAuditableEntity implements UserDetails {
     
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @EqualsAndHashCode.Include
     private Long id;
 
-    @NotBlank(message = "El número de identificación es obligatorio")
-    @Size(min = 2, max = 15, message = "El número de identificación debe tener entre 2 y 15 caracteres")
-    @Column(name = "id_number", nullable = false, length = 15)
+    @NotBlank(message = "user.validation.idNumber.required")
+    @Size(min = 2, max = 15, message = "user.validation.idNumber.size")
+    @Pattern(regexp = "^[0-9A-Za-z-]+$", message = "user.validation.idNumber.format")
+    @Column(name = "id_number", nullable = false, length = 15, unique = true)
     private String idNumber;
     
-    @NotBlank(message = "El nombre es obligatorio")
-    @Size(min = 2, max = 50, message = "El nombre debe tener entre 2 y 50 caracteres")
+    @NotBlank(message = "user.validation.name.required")
+    @Size(min = 2, max = 50, message = "user.validation.name.size")
+    @Pattern(regexp = "^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "user.validation.name.format")
     @Column(name = "name", nullable = false, length = 50)
     private String name;
     
-    @NotBlank(message = "El apellido es obligatorio")
-    @Size(min = 2, max = 50, message = "El apellido debe tener entre 2 y 50 caracteres")
+    @NotBlank(message = "user.validation.lastName.required")
+    @Size(min = 2, max = 50, message = "user.validation.lastName.size")
+    @Pattern(regexp = "^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "user.validation.lastName.format")
     @Column(name = "last_name", nullable = false, length = 50)
     private String lastName;
+
+    @Past(message = "user.validation.dateOfBirth.past")
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
     
-    @NotBlank(message = "El email es obligatorio")
-    @Email(message = "El email debe tener un formato válido")
+    @NotBlank(message = "user.validation.email.required")
+    @Email(message = "user.validation.email.format")
+    @Size(max = 100, message = "user.validation.email.size")
     @Column(name = "email", nullable = false, unique = true, length = 100)
+    @EqualsAndHashCode.Include
     private String email;
-    
-    @NotBlank(message = "La contraseña es obligatoria")
-    @Size(min = 8, message = "La contraseña debe tener al menos 8 caracteres")
-    @Column(name = "password", nullable = false)
-    private String password;
-    
-    @Enumerated(EnumType.STRING)
-    @Column(name = "role", nullable = false)
-    private Role role = Role.BUYER;
-    
-    @Column(name = "enabled", nullable = false)
-    private boolean enabled = false;
-    
-    @Column(name = "token", length = 500)
-    private String token;
-    
-    // Campos adicionales importantes
-    @Pattern(regexp = "^[+]?[0-9]{10,15}$", message = "Formato de teléfono inválido")
+
+    @Pattern(regexp = "^[+]?[0-9]{10,15}$", message = "user.validation.phoneNumber.format")
     @Column(name = "phone_number", length = 20)
     private String phoneNumber;
     
-    @Column(name = "date_of_birth")
-    private LocalDateTime dateOfBirth;
-    
+    @NotBlank(message = "user.validation.password.required")
+    @Size(min = 8, max = 100, message = "user.validation.password.size")
+    @Column(name = "password", nullable = false, length = 255)
+    private String password;
+
+    @NotNull(message = "user.validation.role.required")
+    @Column(name = "role", nullable = false)
     @Enumerated(EnumType.STRING)
-    @Column(name = "gender")
-    private Gender gender;
-    
-    // Campos de auditoría
-    @CreationTimestamp
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
-    
-    @UpdateTimestamp
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    @Builder.Default
+    private EnumRole role = EnumRole.USER;
+
+    @NotNull(message = "user.validation.status.required")
+    @Column(name = "status", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private EnumStatus status = EnumStatus.INACTIVE;
+      
+    @Column(name = "token", length = 500)
+    private String token;
     
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
-    
-    // Campos de verificación
-    @Column(name = "email_verified", nullable = false)
-    private boolean emailVerified = false;
     
     @Column(name = "verification_token", length = 500)
     private String verificationToken;
     
     @Column(name = "verification_token_expiry")
     private LocalDateTime verificationTokenExpiry;
+
+    @Column(name = "code_activation", length = 6)
+    private String codeActivation;
+
+    @Column(name = "code_activation_expiry")
+    private LocalDateTime codeActivationExpiry;
     
-    // Campos de recuperación de contraseña
-    @Column(name = "reset_password_token", length = 500)
-    private String resetPasswordToken;
+    @Column(name = "code_reset_password", length = 6)
+    private String codeResetPassword;
     
-    @Column(name = "reset_password_expiry")
-    private LocalDateTime resetPasswordExpiry;
+    @Column(name = "code_reset_password_expiry")
+    private LocalDateTime codeResetPasswordExpiry;
     
+    @Column(name = "failed_login_attempts", nullable = false)
+    @Builder.Default
+    private Integer failedLoginAttempts = 0;
     
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private List<Order> orders;
+    @Column(name = "account_locked_until")
+    private LocalDateTime accountLockedUntil;
     
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private List<Address> addresses;
+    @Column(name = "password_changed_at")
+    private LocalDateTime passwordChangedAt;
     
-    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @Column(name = "email_verified", nullable = false)
+    @Builder.Default
+    private Boolean emailVerified = false;
+    
+    @Column(name = "phone_verified", nullable = false)
+    @Builder.Default
+    private Boolean phoneVerified = false;
+    
+    @Column(name = "last_ip_address", length = 45)
+    private String lastIpAddress;
+    
+    @Column(name = "user_agent", length = 500)
+    private String userAgent;
+    
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    @Builder.Default
+    private List<Order> orders = Collections.emptyList();
+    
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    @Builder.Default
+    private List<Address> addresses = Collections.emptyList();
+    
+    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private Cart cart;
     
+    // Spring Security UserDetails implementation
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role.name()));
+    }
+
+    @Override
+    public String getUsername() {
+        return email;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return accountLockedUntil == null || accountLockedUntil.isBefore(LocalDateTime.now());
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return passwordChangedAt == null || 
+               passwordChangedAt.isAfter(LocalDateTime.now().minusMonths(6));
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return status == EnumStatus.ACTIVE && Boolean.TRUE.equals(emailVerified);
+    }
     
-    // Métodos útiles
+    // Business methods
     public String getFullName() {
-        return name + " " + lastName;
+        return String.format("%s %s", 
+            Objects.requireNonNullElse(name, ""), 
+            Objects.requireNonNullElse(lastName, "")).trim();
     }
     
+    public String getInitials() {
+        String firstInitial = name != null && !name.isEmpty() ? 
+            String.valueOf(name.charAt(0)).toUpperCase() : "";
+        String lastInitial = lastName != null && !lastName.isEmpty() ? 
+            String.valueOf(lastName.charAt(0)).toUpperCase() : "";
+        return firstInitial + lastInitial;
+    }
+
+    public Integer getAge() {
+        return dateOfBirth != null ? 
+            Period.between(dateOfBirth, LocalDate.now()).getYears() : null;
+    }
+    
+    public boolean isMinor() {
+        Integer age = getAge();
+        return age != null && age < 18;
+    }
+
+    // Role checking methods
     public boolean isAdmin() {
-        return role == Role.ADMIN;
+        return role == EnumRole.ADMIN;
     }
     
-    public boolean isBuyer() {
-        return role == Role.BUYER;
+    public boolean isUser() {
+        return role == EnumRole.USER;
+    }
+    
+    public boolean isSeller() {
+        return role == EnumRole.SELLER;
+    }
+    
+    // Status checking methods
+    public boolean isActive() {
+        return status == EnumStatus.ACTIVE;
+    }
+    
+    public boolean isInactive() {
+        return status == EnumStatus.INACTIVE;
+    }
+
+    // Token and code validation methods
+    public boolean isActivationCodeExpired() {
+        return codeActivationExpiry != null && 
+               codeActivationExpiry.isBefore(LocalDateTime.now());
     }
     
     public boolean isTokenExpired() {
@@ -135,7 +240,81 @@ public class User {
     }
     
     public boolean isResetTokenExpired() {
-        return resetPasswordExpiry != null && 
-               resetPasswordExpiry.isBefore(LocalDateTime.now());
+        return codeResetPasswordExpiry != null && 
+               codeResetPasswordExpiry.isBefore(LocalDateTime.now());
+    }
+    
+    public boolean isAccountTemporarilyLocked() {
+        return accountLockedUntil != null && 
+               accountLockedUntil.isAfter(LocalDateTime.now());
+    }
+    
+    // Security methods
+    public void incrementFailedLoginAttempts() {
+        this.failedLoginAttempts = Objects.requireNonNullElse(this.failedLoginAttempts, 0) + 1;
+    }
+    
+    public void resetFailedLoginAttempts() {
+        this.failedLoginAttempts = 0;
+        this.accountLockedUntil = null;
+    }
+    
+    public void lockAccount(int minutesToLock) {
+        this.accountLockedUntil = LocalDateTime.now().plusMinutes(minutesToLock);
+    }
+    
+    // Verification methods
+    public void markEmailAsVerified() {
+        this.emailVerified = true;
+        this.status = EnumStatus.ACTIVE;
+        this.verificationToken = null;
+        this.verificationTokenExpiry = null;
+    }
+    
+    public void markPhoneAsVerified() {
+        this.phoneVerified = true;
+    }
+    
+    // Cleanup methods
+    public void clearActivationCode() {
+        this.codeActivation = null;
+        this.codeActivationExpiry = null;
+    }
+    
+    public void clearResetPasswordCode() {
+        this.codeResetPassword = null;
+        this.codeResetPasswordExpiry = null;
+    }
+    
+    public void updateLastLogin(String ipAddress, String userAgent) {
+        this.lastLogin = LocalDateTime.now();
+        this.lastIpAddress = ipAddress;
+        this.userAgent = userAgent;
+    }
+    
+    // JPA lifecycle methods
+    @PrePersist
+    protected void onCreate() {
+        super.onCreate();
+        if (status == null) {
+            status = EnumStatus.INACTIVE;
+        }
+        if (role == null) {
+            role = EnumRole.USER;
+        }
+        if (failedLoginAttempts == null) {
+            failedLoginAttempts = 0;
+        }
+        if (emailVerified == null) {
+            emailVerified = false;
+        }
+        if (phoneVerified == null) {
+            phoneVerified = false;
+        }
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        super.onUpdate();
     }
 }
