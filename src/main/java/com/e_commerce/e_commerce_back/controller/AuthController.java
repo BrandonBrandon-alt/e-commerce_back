@@ -139,4 +139,54 @@ public class AuthController {
             throw e;
         }
     }
+
+    /**
+     * Endpoint para activar cuenta con código de verificación
+     */
+    @PostMapping("/activate-account")
+    @Operation(summary = "Activar cuenta", description = "Activa una cuenta de usuario usando el código de activación enviado por email")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Cuenta activada exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Código inválido o expirado"),
+            @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
+    })
+    public ResponseEntity<AuthResponseDTO> activateAccount(@Valid @RequestBody ActivateAccountDTO activateAccountDTO) {
+        log.info("Intento de activación de cuenta para email: {}", activateAccountDTO.email());
+        
+        try {
+            AuthResponseDTO response = authService.activateAccount(activateAccountDTO);
+            log.info("Activación procesada para email: {}", activateAccountDTO.email());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error en activación para email: {}, error: {}", 
+                     activateAccountDTO.email(), e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para reenviar código de activación
+     */
+    @PostMapping("/resend-activation-code")
+    @Operation(summary = "Reenviar código de activación", description = "Reenvía el código de activación a un usuario")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Código reenviado exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Cuenta ya activada"),
+            @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
+    })
+    public ResponseEntity<AuthResponseDTO> resendActivationCode(@Valid @RequestBody ResendActivationCodeDTO resendDTO) {
+        log.info("Intento de reenvío de código para email: {}", resendDTO.email());
+        
+        try {
+            AuthResponseDTO response = authService.resendActivationCode(resendDTO.email());
+            log.info("Reenvío procesado para email: {}", resendDTO.email());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error en reenvío para email: {}, error: {}", 
+                     resendDTO.email(), e.getMessage());
+            throw e;
+        }
+    }
 }

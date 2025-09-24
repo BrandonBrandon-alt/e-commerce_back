@@ -60,4 +60,24 @@ public class AuthResponseDTO {
                 .timestamp(LocalDateTime.now())
                 .build();
     }
+
+    /**
+     * Constructor para respuesta exitosa simple
+     */
+    public static AuthResponseDTO success(String message) {
+        return AuthResponseDTO.builder()
+                .message(message)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    /**
+     * Constructor para respuesta de error
+     */
+    public static AuthResponseDTO error(String message) {
+        return AuthResponseDTO.builder()
+                .message(message)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
 }

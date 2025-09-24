@@ -1,0 +1,5 @@
+{"properties": [{
+  "name": "app.email.from-name",
+  "type": "java.lang.String",
+  "description": "A description for 'app.email.from-name'"
+}]}

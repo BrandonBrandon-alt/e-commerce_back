@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activa tu cuenta</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 10px;
+            padding: 40px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 10px;
+        }
+        .title {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        .activation-code {
+            background-color: #f8f9fa;
+            border: 2px dashed #007bff;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin: 30px 0;
+        }
+        .code {
+            font-size: 36px;
+            font-weight: bold;
+            color: #007bff;
+            letter-spacing: 8px;
+            font-family: 'Courier New', monospace;
+        }
+        .instructions {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 5px 5px 0;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 5px 5px 0;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .button {
+            display: inline-block;
+            background-color: #007bff;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .social-links {
+            margin-top: 20px;
+        }
+        .social-links a {
+            color: #007bff;
+            text-decoration: none;
+            margin: 0 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🛍️ E-Commerce Store</div>
+            <h1 class="title">¡Activa tu cuenta!</h1>
+        </div>
+
+        <p>Hola <strong th:text="${userName}">Usuario</strong>,</p>
+
+        <p>¡Gracias por registrarte en nuestra tienda! Para completar tu registro y activar tu cuenta, 
+           necesitamos verificar tu dirección de email.</p>
+
+        <div class="activation-code">
+            <p style="margin: 0; font-size: 16px; color: #666;">Tu código de activación es:</p>
+            <div class="code" th:text="${activationCode}">123456</div>
+        </div>
+
+        <div class="instructions">
+            <h3 style="margin-top: 0; color: #1976d2;">📋 Instrucciones:</h3>
+            <ol>
+                <li>Ingresa a la aplicación con tu email y contraseña</li>
+                <li>Ve a la sección de "Activar Cuenta"</li>
+                <li>Introduce el código de activación mostrado arriba</li>
+                <li>¡Listo! Tu cuenta estará activada</li>
+            </ol>
+        </div>
+
+        <div class="warning">
+            <h3 style="margin-top: 0; color: #f57c00;">⚠️ Importante:</h3>
+            <ul style="margin-bottom: 0;">
+                <li>Este código expira en <strong th:text="${expiryMinutes}">15</strong> minutos</li>
+                <li>No compartas este código con nadie</li>
+                <li>Si no solicitaste esta cuenta, puedes ignorar este email</li>
+            </ul>
+        </div>
+
+        <p>Si tienes alguna pregunta o necesitas ayuda, no dudes en contactarnos.</p>
+
+        <p>¡Esperamos verte pronto en nuestra tienda!</p>
+
+        <div class="footer">
+            <p><strong>Equipo de E-Commerce Store</strong></p>
+            <p>Este es un email automático, por favor no respondas a este mensaje.</p>
+            <div class="social-links">
+                <a href="#">📧 Soporte</a> |
+                <a href="#">🌐 Sitio Web</a> |
+                <a href="#">📱 Redes Sociales</a>
+            </div>
+            <p style="margin-top: 20px;">© <span th:text="${currentYear}">2024</span> E-Commerce Store. Todos los derechos reservados.</p>
+        </div>
+    </div>
+</body>
+</html>

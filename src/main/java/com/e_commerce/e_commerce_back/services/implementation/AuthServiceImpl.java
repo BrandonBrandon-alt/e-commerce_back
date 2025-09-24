@@ -7,6 +7,7 @@ import com.e_commerce.e_commerce_back.exception.IdNumberIsExists;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
 import com.e_commerce.e_commerce_back.services.interfaces.AuthService;
+import com.e_commerce.e_commerce_back.services.interfaces.EmailService;
 import com.e_commerce.enums.EnumRole;
 import com.e_commerce.enums.EnumStatus;
 
@@ -31,6 +32,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import static com.e_commerce.e_commerce_back.services.implementation.EmailServiceImpl.generateVerificationCode;
 
 /**
  * Implementación del servicio de autenticación
@@ -46,6 +48,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final EmailService emailService;
 
     @Value("${app.jwt.expiration}")
     private Long jwtExpiration;
@@ -55,6 +58,9 @@ public class AuthServiceImpl implements AuthService {
     
     @Value("${app.security.lockout-duration-minutes:30}")
     private Integer lockoutDurationMinutes;
+    
+    @Value("${app.email.activation-code-expiry-minutes:15}")
+    private Integer activationCodeExpiryMinutes;
 
     @Override
     public AuthResponseDTO login(LoginDTO loginDTO) {
@@ -161,6 +167,10 @@ public class AuthServiceImpl implements AuthService {
                 throw new IdNumberIsExists("El número de identificación ya está registrado");
             }
 
+            // Generar código de activación
+            String activationCode = EmailServiceImpl.generateVerificationCode();
+            LocalDateTime codeExpiry = LocalDateTime.now().plusMinutes(activationCodeExpiryMinutes);
+
             // Usar el builder mejorado de User
             User newUser = User.builder()
                     .idNumber(createUserDTO.idNumber())
@@ -175,6 +185,8 @@ public class AuthServiceImpl implements AuthService {
                     .emailVerified(false)
                     .phoneVerified(false)
                     .failedLoginAttempts(0)
+                    .codeActivation(activationCode)
+                    .codeActivationExpiry(codeExpiry)
                     .build();
 
             // El @PrePersist se encargará de los valores por defecto
@@ -185,11 +197,18 @@ public class AuthServiceImpl implements AuthService {
             log.info("Usuario registrado exitosamente: {} - ID: {}", 
                      savedUser.getEmail(), savedUser.getId());
 
-            // En una implementación completa, aquí enviarías el email de verificación
-            // emailService.sendVerificationEmail(savedUser);
+            // Enviar email de activación
+            try {
+                emailService.sendActivationEmail(savedUser, activationCode);
+                log.info("Email de activación enviado a: {}", savedUser.getEmail());
+            } catch (Exception e) {
+                log.error("Error enviando email de activación a {}: {}", 
+                         savedUser.getEmail(), e.getMessage());
+                // No fallar el registro si el email falla
+            }
 
             return AuthResponseDTO.registered(
-                "Usuario registrado exitosamente. Revisa tu email para activar tu cuenta.");
+                "Usuario registrado exitosamente. Revisa tu email para activar tu cuenta con el código de 6 dígitos.");
 
         } catch (EmailIsExists | IdNumberIsExists e) {
             log.warn("Error de registro - {}: {}", e.getClass().getSimpleName(), e.getMessage());
@@ -365,5 +384,110 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
         
         log.info("Cuenta desbloqueada manualmente para usuario: {}", email);
+    }
+
+    @Override
+    public AuthResponseDTO activateAccount(ActivateAccountDTO activateAccountDTO) {
+        log.info("Procesando activación de cuenta para email: {}", activateAccountDTO.email());
+
+        try {
+            // Buscar usuario por email
+            User user = userRepository.findByEmail(activateAccountDTO.email())
+                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+
+            // Verificar si la cuenta ya está activada
+            if (user.isEnabled()) {
+                return AuthResponseDTO.error("La cuenta ya está activada");
+            }
+
+            // Verificar si el código de activación es correcto
+            if (!activateAccountDTO.activationCode().equals(user.getCodeActivation())) {
+                log.warn("Código de activación incorrecto para usuario: {}", activateAccountDTO.email());
+                return AuthResponseDTO.error("Código de activación incorrecto");
+            }
+
+            // Verificar si el código no ha expirado
+            if (user.isActivationCodeExpired()) {
+                log.warn("Código de activación expirado para usuario: {}", activateAccountDTO.email());
+                return AuthResponseDTO.error("El código de activación ha expirado. Solicita un nuevo código.");
+            }
+
+            // Activar la cuenta
+            user.markEmailAsVerified();
+            user.clearActivationCode();
+            
+            // Guardar cambios
+            userRepository.save(user);
+
+            log.info("Cuenta activada exitosamente para usuario: {}", activateAccountDTO.email());
+
+            // Enviar email de bienvenida
+            try {
+                emailService.sendWelcomeEmail(user);
+                log.info("Email de bienvenida enviado a: {}", user.getEmail());
+            } catch (Exception e) {
+                log.error("Error enviando email de bienvenida a {}: {}", 
+                         user.getEmail(), e.getMessage());
+                // No fallar la activación si el email falla
+            }
+
+            return AuthResponseDTO.success("¡Cuenta activada exitosamente! Ya puedes iniciar sesión.");
+
+        } catch (UsernameNotFoundException e) {
+            log.warn("Intento de activación con email no registrado: {}", activateAccountDTO.email());
+            return AuthResponseDTO.error("Usuario no encontrado");
+        } catch (Exception e) {
+            log.error("Error en activación para email: {}, error: {}", activateAccountDTO.email(), e.getMessage());
+            return AuthResponseDTO.error("Error interno del servidor");
+        }
+    }
+
+    @Override
+    public AuthResponseDTO resendActivationCode(String email) {
+        log.info("Procesando reenvío de código de activación para email: {}", email);
+
+        try {
+            // Buscar usuario por email
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+
+            // Verificar si la cuenta ya está activada
+            if (user.isEnabled()) {
+                return AuthResponseDTO.error("La cuenta ya está activada");
+            }
+
+            // Generar nuevo código de activación
+            String newActivationCode = generateVerificationCode();
+            LocalDateTime newCodeExpiry = LocalDateTime.now().plusMinutes(activationCodeExpiryMinutes);
+
+            // Actualizar código en el usuario
+            user.setCodeActivation(newActivationCode);
+            user.setCodeActivationExpiry(newCodeExpiry);
+
+            // Guardar cambios
+            userRepository.save(user);
+
+            log.info("Nuevo código de activación generado para usuario: {}", email);
+
+            // Enviar nuevo email de activación
+            try {
+                emailService.sendActivationEmail(user, newActivationCode);
+                log.info("Nuevo email de activación enviado a: {}", user.getEmail());
+            } catch (Exception e) {
+                log.error("Error enviando nuevo email de activación a {}: {}", 
+                         user.getEmail(), e.getMessage());
+                return AuthResponseDTO.error("Error enviando el email de activación");
+            }
+
+            return AuthResponseDTO.success(
+                "Nuevo código de activación enviado. Revisa tu email.");
+
+        } catch (UsernameNotFoundException e) {
+            log.warn("Intento de reenvío con email no registrado: {}", email);
+            return AuthResponseDTO.error("Usuario no encontrado");
+        } catch (Exception e) {
+            log.error("Error en reenvío para email: {}, error: {}", email, e.getMessage());
+            return AuthResponseDTO.error("Error interno del servidor");
+        }
     }
 }

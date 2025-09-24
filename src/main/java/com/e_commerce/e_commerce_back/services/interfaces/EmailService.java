@@ -1,0 +1,35 @@
+package com.e_commerce.e_commerce_back.services.interfaces;
+
+import com.e_commerce.e_commerce_back.entity.User;
+
+/**
+ * Servicio para el envío de emails
+ */
+public interface EmailService {
+    
+    /**
+     * Envía un email de activación de cuenta con código de verificación
+     * @param user Usuario al que se enviará el email
+     * @param activationCode Código de activación generado
+     */
+    void sendActivationEmail(User user, String activationCode);
+    
+    /**
+     * Envía un email de restablecimiento de contraseña
+     * @param user Usuario al que se enviará el email
+     * @param resetCode Código de restablecimiento generado
+     */
+    void sendPasswordResetEmail(User user, String resetCode);
+    
+    /**
+     * Envía un email de bienvenida después de la activación exitosa
+     * @param user Usuario que activó su cuenta
+     */
+    void sendWelcomeEmail(User user);
+    
+    /**
+     * Envía un email de notificación de cambio de contraseña
+     * @param user Usuario que cambió su contraseña
+     */
+    void sendPasswordChangedNotification(User user);
+}

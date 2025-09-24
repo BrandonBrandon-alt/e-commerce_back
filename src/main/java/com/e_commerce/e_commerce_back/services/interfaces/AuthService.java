@@ -39,4 +39,18 @@ public interface AuthService {
      * @param authHeader Header de autorización con el token
      */
     void logout(String authHeader);
+    
+    /**
+     * Activa una cuenta de usuario usando el código de activación
+     * @param activateAccountDTO Datos de activación
+     * @return Respuesta de activación
+     */
+    AuthResponseDTO activateAccount(ActivateAccountDTO activateAccountDTO);
+    
+    /**
+     * Reenvía el código de activación a un usuario
+     * @param activateAccountDTO Datos de activación
+     * @return Respuesta de reenvío
+     */
+    AuthResponseDTO resendActivationCode(String email);
 }
