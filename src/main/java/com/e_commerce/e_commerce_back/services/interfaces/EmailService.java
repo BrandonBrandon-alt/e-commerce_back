@@ -6,6 +6,18 @@ import com.e_commerce.e_commerce_back.entity.User;
  * Servicio para el envío de emails
  */
 public interface EmailService {
+
+    /**
+     * Genera un código de verificación de 6 dígitos.
+     * @return El código generado como String.
+     */
+    String generateActivationCode();
+    
+    /**
+     * Genera un código de verificación de 6 dígitos.
+     * @return El código generado como String.
+     */
+    String generateResetCode();
     
     /**
      * Envía un email de activación de cuenta con código de verificación
@@ -28,7 +40,7 @@ public interface EmailService {
     void sendWelcomeEmail(User user);
     
     /**
-     * Envía un email de notificación de cambio de contraseña
+     * Envía un email de notificacion de cambio de contraseña
      * @param user Usuario que cambió su contraseña
      */
     void sendPasswordChangedNotification(User user);

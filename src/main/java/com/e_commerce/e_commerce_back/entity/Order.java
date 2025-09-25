@@ -114,6 +114,11 @@ public class Order {
     @JoinColumn(name = "promotion_id")
     private Promotion promotion;
     
+    // Cupón aplicado al pedido (opcional)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "coupon_id")
+    private Coupon coupon;
+    
     // Enums
     public enum OrderStatus {
         PENDING("Pendiente"),

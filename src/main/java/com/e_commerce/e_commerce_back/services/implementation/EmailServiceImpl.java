@@ -190,10 +190,13 @@ public class EmailServiceImpl implements EmailService {
         mailSender.send(message);
     }
 
-    /**
-     * Método utilitario para generar códigos de activación/reset
-     */
-    public static String generateVerificationCode() {
+    @Override
+    public String generateActivationCode() {
+        return String.format("%06d", (int) (Math.random() * 1000000));
+    }
+
+    @Override
+    public String generateResetCode() {
         return String.format("%06d", (int) (Math.random() * 1000000));
     }
 }

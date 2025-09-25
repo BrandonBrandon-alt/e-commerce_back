@@ -32,7 +32,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
-import static com.e_commerce.e_commerce_back.services.implementation.EmailServiceImpl.generateVerificationCode;
 
 /**
  * Implementación del servicio de autenticación
@@ -168,7 +167,7 @@ public class AuthServiceImpl implements AuthService {
             }
 
             // Generar código de activación
-            String activationCode = EmailServiceImpl.generateVerificationCode();
+            String activationCode = emailService.generateActivationCode();
             LocalDateTime codeExpiry = LocalDateTime.now().plusMinutes(activationCodeExpiryMinutes);
 
             // Usar el builder mejorado de User
@@ -277,16 +276,25 @@ public class AuthServiceImpl implements AuthService {
                 // 2. Almacenar tokens invalidados con TTL
                 // 3. Usar un mecanismo de revocación de tokens
 
-                String username = jwtUtil.extractUsername(token);
-                log.info("Logout procesado para usuario: {}", username);
+                try {
+                    // Intentar extraer username del token
+                    String username = jwtUtil.extractUsername(token);
+                    log.info("Logout procesado para usuario: {}", username);
+                } catch (Exception tokenException) {
+                    // Si el token es inválido, solo logeamos el intento de logout
+                    log.warn("Intento de logout con token inválido: {}", tokenException.getMessage());
+                }
 
-                // Limpiar contexto de seguridad
+                // Limpiar contexto de seguridad independientemente de si el token es válido
                 SecurityContextHolder.clearContext();
+            } else {
+                log.info("Logout procesado sin token válido");
             }
 
         } catch (Exception e) {
             log.error("Error en logout: {}", e.getMessage());
-            throw new RuntimeException("Error procesando logout");
+            // No lanzar excepción para logout - es mejor ser permisivo
+            log.warn("Logout completado a pesar del error");
         }
     }
 
@@ -457,7 +465,7 @@ public class AuthServiceImpl implements AuthService {
             }
 
             // Generar nuevo código de activación
-            String newActivationCode = generateVerificationCode();
+            String newActivationCode = emailService.generateActivationCode();
             LocalDateTime newCodeExpiry = LocalDateTime.now().plusMinutes(activationCodeExpiryMinutes);
 
             // Actualizar código en el usuario
@@ -489,5 +497,82 @@ public class AuthServiceImpl implements AuthService {
             log.error("Error en reenvío para email: {}, error: {}", email, e.getMessage());
             return AuthResponseDTO.error("Error interno del servidor");
         }
+    }
+
+    @Override
+    public AuthResponseDTO forgotPassword(ForgotPasswordDTO forgotPasswordDTO) {
+        try {
+            User user = userRepository.findByEmail(forgotPasswordDTO.email())
+                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado con el email: " + forgotPasswordDTO.email()));
+
+            String resetCode = emailService.generateResetCode();
+            user.setCodeResetPassword(resetCode);
+            user.setCodeResetPasswordExpiry(LocalDateTime.now().plusMinutes(15)); // El código expira en 15 minutos
+
+            userRepository.save(user);
+
+                        emailService.sendPasswordResetEmail(user, resetCode);
+
+            log.info("Código de reseteo de contraseña enviado a: {}", forgotPasswordDTO.email());
+            return AuthResponseDTO.success("Se ha enviado un código de reseteo a tu correo electrónico.");
+
+        } catch (UsernameNotFoundException e) {
+            log.warn("Intento de reseteo de contraseña para email no registrado: {}", forgotPasswordDTO.email());
+            // Por seguridad, no revelamos si el email existe o no.
+            return AuthResponseDTO.success("Si tu correo está registrado, recibirás un código de reseteo.");
+        } catch (Exception e) {
+            log.error("Error al procesar la solicitud de olvido de contraseña para {}: {}", forgotPasswordDTO.email(), e.getMessage());
+            return AuthResponseDTO.error("Error interno del servidor al intentar resetear la contraseña.");
+        }
+    }
+
+    @Override
+    public AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO) {
+        try {
+            User user = userRepository.findByEmail(resetPasswordDTO.email())
+                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+
+             // Verificar si el código de activación es correcto
+             if (!resetPasswordDTO.resetCode().equals(user.getCodeResetPassword())) {
+                log.warn("Código de activación incorrecto para usuario: {}", resetPasswordDTO.email());
+                return AuthResponseDTO.error("Código de activación incorrecto");
+            }
+            
+            if (!resetPasswordDTO.passwordsMatch()) {
+                return AuthResponseDTO.error("Las contraseñas no coinciden");
+            }
+            
+            user.setPassword(passwordEncoder.encode(resetPasswordDTO.password()));
+            user.clearResetPasswordCode();
+            
+            userRepository.save(user);
+            
+            return AuthResponseDTO.success("Contraseña restablecida exitosamente");
+            
+        } catch (Exception e) {
+            log.error("Error al restablecer contraseña para email: {}, error: {}", 
+                     resetPasswordDTO.email(), e.getMessage());
+            return AuthResponseDTO.error("Error interno del servidor");
+        }
+   
+        
+    }
+
+    @Override
+    public AuthResponseDTO refreshToken(RefreshTokenDTO refreshTokenDTO) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'refreshToken'");
+    }
+
+    @Override
+    public void changePassword(ChangePasswordDTO changePasswordDTO) {
+
+       
+    }
+
+    @Override
+    public void changeEmail(ChangeEmailDTO changeEmailDTO) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'changeEmail'");
     }
 }

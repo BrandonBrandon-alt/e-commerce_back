@@ -6,28 +6,42 @@ import com.e_commerce.e_commerce_back.dto.*;
  * Interfaz para servicios de autenticación
  */
 public interface AuthService {
-    
+     // --- Autenticación Principal ---
     /**
      * Autentica un usuario y genera un token JWT
      * @param loginDTO Datos de login
      * @return Respuesta con token y información del usuario
      */
     AuthResponseDTO login(LoginDTO loginDTO);
-    
+
     /**
      * Registra un nuevo usuario
      * @param createUserDTO Datos del usuario a registrar
      * @return Respuesta de registro
      */
     AuthResponseDTO register(RegisterUserDTO createUserDTO);
+
+     /**
+     * Cierra sesión invalidando el token
+     * @param authHeader Header de autorización con el token
+     */
+    void logout(String authHeader);
     
+      //-------------------GESTION DE TOKENS-------------------//
     /**
      * Valida un token JWT
      * @param authHeader Header de autorización con el token
      * @return Información de validación del token
      */
     TokenValidationDTO validateToken(String authHeader);
+    /**
+     * Genera un nuevo token JWT
+     * @param refreshTokenDTO
+     * @return
+     */
+    AuthResponseDTO refreshToken(RefreshTokenDTO refreshTokenDTO); 
     
+    //-------------------GESTION DEL USUARIO AUTHENTICADO-------------------//
     /**
      * Obtiene información del usuario autenticado actual
      * @return Información del usuario
@@ -35,10 +49,22 @@ public interface AuthService {
     UserInfoDTO getCurrentUserInfo();
     
     /**
-     * Cierra sesión invalidando el token
-     * @param authHeader Header de autorización con el token
+     * Cambia la contraseña del usuario autenticado actual
+     * @param changePasswordDTO Datos de cambio de contraseña
      */
-    void logout(String authHeader);
+    void changePassword(ChangePasswordDTO changePasswordDTO);
+    
+
+    /**
+     * Cambia el email del usuario autenticado actual
+     * @param changeEmailDTO Datos de cambio de email
+     */
+    void changeEmail(ChangeEmailDTO changeEmailDTO);
+
+
+    
+
+    //-------------------GESTION DE LA CUENTA-------------------//
     
     /**
      * Activa una cuenta de usuario usando el código de activación
@@ -53,4 +79,22 @@ public interface AuthService {
      * @return Respuesta de reenvío
      */
     AuthResponseDTO resendActivationCode(String email);
+
+    //-------------------GESTION DE LA CONTRASEÑA-------------------//
+    /**
+     * Inicia el proceso de reseteo de contraseña para un usuario.
+     * Genera un código de reseteo y lo envía por email.
+     * @param email El email del usuario que solicita el reseteo.
+     * @return Una respuesta indicando si el email fue enviado.
+     */
+    AuthResponseDTO forgotPassword(ForgotPasswordDTO forgotPasswordDTO);
+
+    /**
+     * Resetea la contraseña de un usuario
+     * @param resetPasswordDTO Datos de reseteo de contraseña
+     * @return Respuesta de reseteo
+     */
+    AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO);
+
+    
 }
