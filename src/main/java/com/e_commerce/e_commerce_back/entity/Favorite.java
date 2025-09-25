@@ -64,10 +64,10 @@ public class Favorite extends BaseAuditableEntity {
     @Builder.Default
     private Boolean notifyPromotion = true;
     
-    @Column(name = "target_price", precision = 10, scale = 2)
+    @Column(name = "target_price")
     private Double targetPrice;
     
-    @Column(name = "last_price_check", precision = 10, scale = 2)
+    @Column(name = "last_price_check")
     private Double lastPriceCheck;
     
     @Column(name = "last_price_check_date")
