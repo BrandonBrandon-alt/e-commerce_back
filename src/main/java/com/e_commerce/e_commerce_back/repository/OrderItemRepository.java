@@ -1,14 +1,11 @@
 package com.e_commerce.e_commerce_back.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import com.e_commerce.e_commerce_back.entity.OrderItem;
 import com.e_commerce.e_commerce_back.entity.Order;
 import com.e_commerce.e_commerce_back.entity.Product;
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
