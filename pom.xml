@@ -120,6 +120,21 @@
 			<version>0.11.5</version>
 			<scope>runtime</scope>
 		</dependency>
+
+		<!-- Redis Dependencies -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+		
+		<!-- Lettuce Redis Client (incluido por defecto con spring-boot-starter-data-redis) -->
+		<!-- Pero si prefieres Jedis, puedes usar esto en su lugar:
+		<dependency>
+			<groupId>redis.clients</groupId>
+			<artifactId>jedis</artifactId>
+		</dependency>
+		-->
+
 		</dependencies>
 
 		<build>

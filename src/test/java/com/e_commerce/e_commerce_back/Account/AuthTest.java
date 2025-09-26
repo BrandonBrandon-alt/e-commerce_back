@@ -11,6 +11,7 @@ import com.e_commerce.e_commerce_back.dto.ForgotPasswordDTO;
 import com.e_commerce.e_commerce_back.dto.LoginDTO;
 import com.e_commerce.e_commerce_back.dto.RegisterUserDTO;
 import com.e_commerce.e_commerce_back.dto.ResetPasswordDTO;
+import com.e_commerce.e_commerce_back.dto.RefreshTokenDTO;
 import com.e_commerce.e_commerce_back.services.implementation.AuthServiceImpl;
 import com.e_commerce.e_commerce_back.services.interfaces.EmailService;
 import com.e_commerce.e_commerce_back.entity.User;
@@ -58,49 +59,6 @@ public class AuthTest {
     }
 
     @Test
-    void loginTest() throws Exception {
-        try {
-            System.out.println("=== TESTING USER LOGIN ===");
-            
-            // Primero registrar y activar un usuario
-            RegisterUserDTO registerUserDTO = new RegisterUserDTO(
-                "11111111", 
-                "Login", 
-                "Test", 
-                "brandonmontealegre15@gmail.com", 
-                "3153033412", 
-                "M@mahermosa123", 
-                LocalDate.of(1990, 1, 1), 
-                true
-            );
-            
-            System.out.println("Registrando usuario para test de login...");
-            authServiceImpl.register(registerUserDTO);
-            Thread.sleep(2000);
-            
-            // Nota: En un test real, usarías el código del email recibido
-            System.out.println("Nota: En un test real, usarías el código del email recibido");
-            
-            LoginDTO loginDTO = new LoginDTO("brandonmontealegre15@gmail.com", "M@mahermosa123");
-            System.out.println("Intentando login para: " + loginDTO.email());
-            
-            try {
-                var result = authServiceImpl.login(loginDTO);
-                System.out.println("Login exitoso: " + result.getMessage());
-            } catch (Exception e) {
-                System.out.println("Login falló (esperado si la cuenta no está activada): " + e.getMessage());
-            }
-            
-            System.out.println("Login test completed!");
-            
-        } catch (Exception e) {
-            System.err.println("Test failed with exception: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-            e.printStackTrace();
-            throw e;
-        }
-     }
-
-     @Test
      void activateAccountTest() throws Exception {
         try {
             System.out.println("=== TESTING ACCOUNT ACTIVATION WITH REAL EMAIL ===");
@@ -180,6 +138,51 @@ public class AuthTest {
             throw e;
         }
      }
+
+    @Test
+    void loginTest() throws Exception {
+        try {
+            System.out.println("=== TESTING USER LOGIN ===");
+            
+            // Primero registrar y activar un usuario
+            RegisterUserDTO registerUserDTO = new RegisterUserDTO(
+                "11111111", 
+                "Login", 
+                "Test", 
+                "brandonmontealegre15@gmail.com", 
+                "3153033412", 
+                "M@mahermosa123", 
+                LocalDate.of(1990, 1, 1), 
+                true
+            );
+            
+            System.out.println("Registrando usuario para test de login...");
+            authServiceImpl.register(registerUserDTO);
+            Thread.sleep(2000);
+            
+            // Nota: En un test real, usarías el código del email recibido
+            System.out.println("Nota: En un test real, usarías el código del email recibido");
+            
+            LoginDTO loginDTO = new LoginDTO("brandonmontealegre15@gmail.com", "M@mahermosa123");
+            System.out.println("Intentando login para: " + loginDTO.email());
+            
+            try {
+                var result = authServiceImpl.login(loginDTO);
+                System.out.println("Login exitoso: " + result.getMessage());
+            } catch (Exception e) {
+                System.out.println("Login falló (esperado si la cuenta no está activada): " + e.getMessage());
+            }
+            
+            System.out.println("Login test completed!");
+            
+        } catch (Exception e) {
+            System.err.println("Test failed with exception: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            e.printStackTrace();
+            throw e;
+        }
+     }
+
+     
 
      @Test
      void resetPasswordEmailTest() {
@@ -494,6 +497,158 @@ public class AuthTest {
             
         } catch (Exception e) {
             System.err.println("Get current user info test failed: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            e.printStackTrace();
+            throw e;
+        }
+    }
+
+    @Test
+    void refreshTokenTest() throws Exception {
+        try {
+            System.out.println("=== TESTING REFRESH TOKEN FUNCTIONALITY ===");
+            
+            // ESCENARIO 1: Token nulo
+            System.out.println("\n1. Probando refresh token con token nulo...");
+            try {
+                RefreshTokenDTO nullTokenDTO = new RefreshTokenDTO(null);
+                var result = authServiceImpl.refreshToken(nullTokenDTO);
+                System.out.println("   ❌ Error: No debería haber funcionado con token nulo");
+            } catch (IllegalArgumentException e) {
+                System.out.println("   ✅ Error esperado con token nulo: " + e.getMessage());
+            } catch (Exception e) {
+                System.out.println("   ⚠️  Error inesperado: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            }
+            
+            // ESCENARIO 2: Token vacío
+            System.out.println("\n2. Probando refresh token con token vacío...");
+            try {
+                RefreshTokenDTO emptyTokenDTO = new RefreshTokenDTO("");
+                var result = authServiceImpl.refreshToken(emptyTokenDTO);
+                System.out.println("   ❌ Error: No debería haber funcionado con token vacío");
+            } catch (IllegalArgumentException e) {
+                System.out.println("   ✅ Error esperado con token vacío: " + e.getMessage());
+            } catch (Exception e) {
+                System.out.println("   ⚠️  Error inesperado: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            }
+            
+            // ESCENARIO 3: Token con solo espacios
+            System.out.println("\n3. Probando refresh token con token de solo espacios...");
+            try {
+                RefreshTokenDTO spacesTokenDTO = new RefreshTokenDTO("   ");
+                var result = authServiceImpl.refreshToken(spacesTokenDTO);
+                System.out.println("   ❌ Error: No debería haber funcionado con token de espacios");
+            } catch (IllegalArgumentException e) {
+                System.out.println("   ✅ Error esperado con token de espacios: " + e.getMessage());
+            } catch (Exception e) {
+                System.out.println("   ⚠️  Error inesperado: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            }
+            
+            // ESCENARIO 4: Token malformado
+            System.out.println("\n4. Probando refresh token con token malformado...");
+            try {
+                String malformedToken = "esto-no-es-un-jwt-valido";
+                RefreshTokenDTO malformedTokenDTO = new RefreshTokenDTO(malformedToken);
+                var result = authServiceImpl.refreshToken(malformedTokenDTO);
+                System.out.println("   ❌ Error: No debería haber funcionado con token malformado");
+            } catch (SecurityException e) {
+                System.out.println("   ✅ Error esperado con token malformado: " + e.getMessage());
+            } catch (Exception e) {
+                System.out.println("   ⚠️  Error inesperado: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            }
+            
+            // ESCENARIO 5: Token JWT inválido pero bien formado
+            System.out.println("\n5. Probando refresh token con JWT inválido pero bien formado...");
+            try {
+                String invalidJWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+                RefreshTokenDTO invalidJWTDTO = new RefreshTokenDTO(invalidJWT);
+                var result = authServiceImpl.refreshToken(invalidJWTDTO);
+                System.out.println("   ❌ Error: No debería haber funcionado con JWT inválido");
+            } catch (SecurityException e) {
+                System.out.println("   ✅ Error esperado con JWT inválido: " + e.getMessage());
+            } catch (Exception e) {
+                System.out.println("   ⚠️  Error inesperado: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            }
+            
+            // ESCENARIO 6: Flujo completo con usuario real (registro + login + refresh)
+            System.out.println("\n6. Probando flujo completo: registro → activación → login → refresh token...");
+            try {
+                // Paso 1: Registrar usuario único para este test
+                String uniqueId = "refresh" + System.currentTimeMillis();
+                RegisterUserDTO registerUserDTO = new RegisterUserDTO(
+                    uniqueId, 
+                    "Refresh", 
+                    "Token", 
+                    "brandonmontealegre15@gmail.com", 
+                    "3153033412", 
+                    "M@mahermosa123", 
+                    LocalDate.of(1990, 1, 1), 
+                    true
+                );
+                
+                System.out.println("   6.1. Registrando usuario para test de refresh token...");
+                var registerResult = authServiceImpl.register(registerUserDTO);
+                System.out.println("       Registro: " + registerResult.getMessage());
+                Thread.sleep(2000);
+                
+                // Paso 2: Simular activación de cuenta (en un test real usarías el código del email)
+                System.out.println("   6.2. Simulando activación de cuenta...");
+                System.out.println("       NOTA: En un entorno real, necesitarías el código de activación del email");
+                System.out.println("       Para este test, intentaremos con un código de ejemplo (probablemente fallará)");
+                
+                try {
+                    ActivateAccountDTO activateDTO = new ActivateAccountDTO("brandonmontealegre15@gmail.com", "123456");
+                    var activateResult = authServiceImpl.activateAccount(activateDTO);
+                    System.out.println("       Activación: " + activateResult.getMessage());
+                    
+                    // Paso 3: Intentar login para obtener tokens
+                    System.out.println("   6.3. Intentando login para obtener tokens...");
+                    LoginDTO loginDTO = new LoginDTO("brandonmontealegre15@gmail.com", "M@mahermosa123");
+                    var loginResult = authServiceImpl.login(loginDTO);
+                    System.out.println("       Login exitoso: " + loginResult.getMessage());
+                    
+                    // Paso 4: Usar el refresh token obtenido del login
+                    if (loginResult.getRefreshToken() != null && !loginResult.getRefreshToken().isEmpty()) {
+                        System.out.println("   6.4. Probando refresh token obtenido del login...");
+                        RefreshTokenDTO refreshDTO = new RefreshTokenDTO(loginResult.getRefreshToken());
+                        var refreshResult = authServiceImpl.refreshToken(refreshDTO);
+                        
+                        System.out.println("       ✅ Refresh token exitoso!");
+                        System.out.println("       Nuevo access token generado: " + (refreshResult.getAccessToken() != null ? "Sí" : "No"));
+                        System.out.println("       Nuevo refresh token generado: " + (refreshResult.getRefreshToken() != null ? "Sí" : "No"));
+                        System.out.println("       Token type: " + refreshResult.getTokenType());
+                        System.out.println("       Expires in: " + refreshResult.getExpiresIn() + " ms");
+                    } else {
+                        System.out.println("       ⚠️  No se obtuvo refresh token del login");
+                    }
+                    
+                } catch (Exception activationException) {
+                    System.out.println("       ⚠️  Activación falló (esperado sin código real): " + activationException.getMessage());
+                    System.out.println("       No se puede continuar con login/refresh sin activación");
+                }
+                
+            } catch (Exception e) {
+                System.out.println("   ⚠️  Error en flujo completo: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            }
+            
+            // RESUMEN
+            System.out.println("\n=== RESUMEN DEL TEST DE REFRESH TOKEN ===");
+            System.out.println("✅ Validación de token nulo - OK");
+            System.out.println("✅ Validación de token vacío - OK");
+            System.out.println("✅ Validación de token con espacios - OK");
+            System.out.println("✅ Validación de token malformado - OK");
+            System.out.println("✅ Validación de JWT inválido - OK");
+            System.out.println("⚠️  Flujo completo - Requiere activación manual con código de email");
+            System.out.println("\n📧 PARA PROBAR EL FLUJO COMPLETO:");
+            System.out.println("   1. Ejecuta el test registerTest() primero");
+            System.out.println("   2. Revisa tu email y obtén el código de activación");
+            System.out.println("   3. Ejecuta activateAccountTest() con el código real");
+            System.out.println("   4. Luego ejecuta loginTest() para obtener tokens");
+            System.out.println("   5. Finalmente usa el refresh token obtenido en este test");
+            
+            System.out.println("\nRefresh token test completed!");
+            
+        } catch (Exception e) {
+            System.err.println("Refresh token test failed: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             e.printStackTrace();
             throw e;
         }

@@ -199,4 +199,40 @@ public class EmailServiceImpl implements EmailService {
     public String generateResetCode() {
         return String.format("%06d", (int) (Math.random() * 1000000));
     }
+
+    @Override
+    public void sendUnlockCode(User user, String unlockCode) {
+        log.info("Enviando email con código de desbloqueo a: {}", user.getEmail());
+        
+        try {
+            Context context = new Context();
+            context.setVariable("userName", user.getFullName());
+            context.setVariable("unlockCode", unlockCode);
+            context.setVariable("expiryMinutes", activationCodeExpiryMinutes); // Reutilizamos el tiempo de expiración
+            context.setVariable("currentYear", LocalDateTime.now().getYear());
+            context.setVariable("requestDateTime", LocalDateTime.now().format(
+                DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")
+            ));
+            
+            String htmlContent = templateEngine.process("emails/unlock-code-email", context);
+            
+            // Envío asíncrono
+            CompletableFuture.runAsync(() -> {
+                try {
+                    sendHtmlEmail(
+                        user.getEmail(),
+                        "Código de desbloqueo de cuenta - " + fromName,
+                        htmlContent
+                    );
+                    log.info("Email con código de desbloqueo enviado exitosamente a: {}", user.getEmail());
+                } catch (Exception e) {
+                    log.error("Error enviando email de código de desbloqueo a {}: {}", user.getEmail(), e.getMessage());
+                }
+            });
+            
+        } catch (Exception e) {
+            log.error("Error preparando email de código de desbloqueo para {}: {}", user.getEmail(), e.getMessage());
+            throw new RuntimeException("Error enviando email de código de desbloqueo", e);
+        }
+    }
 }

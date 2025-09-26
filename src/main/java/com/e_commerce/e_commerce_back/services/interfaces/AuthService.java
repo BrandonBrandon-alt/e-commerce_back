@@ -52,18 +52,22 @@ public interface AuthService {
      * Cambia la contraseña del usuario autenticado actual
      * @param changePasswordDTO Datos de cambio de contraseña
      */
-    void changePassword(ChangePasswordDTO changePasswordDTO);
+    AuthResponseDTO changePassword(ChangePasswordDTO changePasswordDTO);
     
 
     /**
      * Cambia el email del usuario autenticado actual
      * @param changeEmailDTO Datos de cambio de email
      */
-    void changeEmail(ChangeEmailDTO changeEmailDTO);
+    AuthResponseDTO changeEmail(ChangeEmailDTO changeEmailDTO);
 
 
+    /**
+     * Actualiza la información del usuario autenticado actual
+     * @param userInfoDTO Datos de la información del usuario
+     */
+    AuthResponseDTO updateUserInfo(UpdateUserProfileDTO updateUserInfoDTO);
     
-
     //-------------------GESTION DE LA CUENTA-------------------//
     
     /**
@@ -96,5 +100,20 @@ public interface AuthService {
      */
     AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO);
 
+    //-------------------GESTION DE LA CUENTA-------------------//
+
+    /**
+     * Solicita un desbloqueo inmediato para un usuario
+     * @param requestImmediateUnlockDTO Datos de solicitud de desbloqueo
+     * @return Respuesta de solicitud de desbloqueo
+     */
     
+    AuthResponseDTO requestImmediateUnlock(RequestImmediateUnlockDTO requestImmediateUnlockDTO);
+
+    /**
+     * Desbloquea una cuenta de usuario
+     * @param requestImmediateUnlockDTO Datos de desbloqueo
+     * @return Respuesta de desbloqueo
+     */
+    AuthResponseDTO verifyUnlockCode(VerifyUnlockCodeDTO verifyUnlockCodeDTO);
 }

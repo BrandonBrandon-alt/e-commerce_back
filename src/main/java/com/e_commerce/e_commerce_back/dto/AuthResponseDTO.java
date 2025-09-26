@@ -20,6 +20,9 @@ public class AuthResponseDTO {
     @JsonProperty("access_token")
     private String accessToken;
     
+    @JsonProperty("refresh_token")
+    private String refreshToken;
+    
     @JsonProperty("token_type")
     @Builder.Default
     private String tokenType = "Bearer";
@@ -38,7 +41,22 @@ public class AuthResponseDTO {
     private String message;
 
     /**
-     * Constructor para respuesta exitosa de login
+     * Constructor para respuesta exitosa de login con tokens
+     */
+    public static AuthResponseDTO success(String accessToken, String refreshToken, Long expiresIn, UserInfoDTO userInfo) {
+        return AuthResponseDTO.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .tokenType("Bearer")
+                .expiresIn(expiresIn)
+                .userInfo(userInfo)
+                .message("Autenticación exitosa")
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    /**
+     * Constructor para respuesta exitosa de login (sin refresh token - legacy)
      */
     public static AuthResponseDTO success(String accessToken, Long expiresIn, UserInfoDTO userInfo) {
         return AuthResponseDTO.builder()
@@ -47,6 +65,20 @@ public class AuthResponseDTO {
                 .expiresIn(expiresIn)
                 .userInfo(userInfo)
                 .message("Autenticación exitosa")
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    /**
+     * Constructor para respuesta exitosa de refresh token
+     */
+    public static AuthResponseDTO refreshSuccess(String accessToken, String refreshToken, Long expiresIn) {
+        return AuthResponseDTO.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .tokenType("Bearer")
+                .expiresIn(expiresIn)
+                .message("Tokens renovados exitosamente")
                 .timestamp(LocalDateTime.now())
                 .build();
     }

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Código de Desbloqueo de Cuenta</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 10px;
+            padding: 40px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #dc3545;
+            margin-bottom: 10px;
+        }
+        .title {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        .unlock-code {
+            background-color: #fff5f5;
+            border: 2px dashed #dc3545;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin: 30px 0;
+        }
+        .code {
+            font-size: 36px;
+            font-weight: bold;
+            color: #dc3545;
+            letter-spacing: 8px;
+            font-family: 'Courier New', monospace;
+        }
+        .instructions {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 5px 5px 0;
+        }
+        .security-info {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 5px 5px 0;
+        }
+        .info-box {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 5px 5px 0;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .button {
+            display: inline-block;
+            background-color: #dc3545;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .social-links {
+            margin-top: 20px;
+        }
+        .social-links a {
+            color: #dc3545;
+            text-decoration: none;
+            margin: 0 10px;
+        }
+        .timestamp {
+            font-size: 12px;
+            color: #6c757d;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🔓 E-Commerce Store</div>
+            <h1 class="title">Código de Desbloqueo</h1>
+        </div>
+
+        <p>Hola <strong th:text="${userName}">Usuario</strong>,</p>
+
+        <p>Hemos recibido una solicitud para desbloquear tu cuenta. Si fuiste tú quien realizó esta solicitud, 
+           utiliza el siguiente código para desbloquear tu cuenta de forma inmediata.</p>
+
+        <div class="info-box">
+            <p style="margin: 0; font-size: 14px; color: #0c5460;">
+                <strong>📅 Solicitud realizada:</strong> <span th:text="${requestDateTime}">25/09/2024 21:45</span>
+            </p>
+        </div>
+
+        <div class="unlock-code">
+            <p style="margin: 0; font-size: 16px; color: #666;">Tu código de desbloqueo es:</p>
+            <div class="code" th:text="${unlockCode}">123456</div>
+        </div>
+
+        <div class="instructions">
+            <h3 style="margin-top: 0; color: #856404;">📋 Instrucciones para desbloquear:</h3>
+            <ol>
+                <li>Ve a la página de inicio de sesión</li>
+                <li>Haz clic en "¿Cuenta bloqueada?"</li>
+                <li>Introduce tu email y el código mostrado arriba</li>
+                <li>Tu cuenta será desbloqueada inmediatamente</li>
+            </ol>
+        </div>
+
+        <div class="security-info">
+            <h3 style="margin-top: 0; color: #721c24;">🔒 Información de Seguridad:</h3>
+            <ul style="margin-bottom: 0;">
+                <li>Este código expira en <strong th:text="${expiryMinutes}">15</strong> minutos</li>
+                <li>Solo puede ser usado una vez</li>
+                <li>No compartas este código con nadie</li>
+                <li>Si no solicitaste el desbloqueo, contacta inmediatamente a soporte</li>
+            </ul>
+        </div>
+
+        <div class="info-box">
+            <h3 style="margin-top: 0; color: #0c5460;">💡 ¿No fuiste tú?</h3>
+            <p style="margin-bottom: 0;">
+                Si no solicitaste el desbloqueo de tu cuenta, es posible que alguien esté intentando 
+                acceder a ella. Por seguridad, te recomendamos cambiar tu contraseña y contactar 
+                a nuestro equipo de soporte.
+            </p>
+        </div>
+
+        <p>Si tienes alguna pregunta o necesitas ayuda adicional, no dudes en contactar a nuestro 
+           equipo de soporte técnico.</p>
+
+        <div class="footer">
+            <p><strong>Equipo de Seguridad - E-Commerce Store</strong></p>
+            <p>Este es un email automático, por favor no respondas a este mensaje.</p>
+            <div class="social-links">
+                <a href="#">🛡️ Centro de Seguridad</a> |
+                <a href="#">📧 Soporte</a> |
+                <a href="#">🌐 Sitio Web</a>
+            </div>
+            <p style="margin-top: 20px;">© <span th:text="${currentYear}">2024</span> E-Commerce Store. Todos los derechos reservados.</p>
+        </div>
+    </div>
+</body>
+</html>

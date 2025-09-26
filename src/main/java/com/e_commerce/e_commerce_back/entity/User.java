@@ -21,20 +21,21 @@ import java.util.Objects;
 
 @Entity
 @Table(name = "users", indexes = {
-    @Index(name = "idx_user_email", columnList = "email"),
-    @Index(name = "idx_user_id_number", columnList = "id_number"),
-    @Index(name = "idx_user_status_role", columnList = "status, role"),
-    @Index(name = "idx_user_created_at", columnList = "created_at")
+        @Index(name = "idx_user_email", columnList = "email"),
+        @Index(name = "idx_user_id_number", columnList = "id_number"),
+        @Index(name = "idx_user_status_role", columnList = "status, role"),
+        @Index(name = "idx_user_created_at", columnList = "created_at")
 })
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @SuperBuilder
-@ToString(exclude = {"password", "token", "verificationToken", "codeActivation", "codeResetPassword", "orders", "addresses", "cart"})
+@ToString(exclude = { "password", "token", "verificationToken", "codeActivation", "codeResetPassword", "orders",
+        "addresses", "cart" })
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class User extends BaseAuditableEntity implements UserDetails {
-    
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @EqualsAndHashCode.Include
@@ -45,13 +46,13 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @Pattern(regexp = "^[0-9A-Za-z-]+$", message = "user.validation.idNumber.format")
     @Column(name = "id_number", nullable = false, length = 15, unique = true)
     private String idNumber;
-    
+
     @NotBlank(message = "user.validation.name.required")
     @Size(min = 2, max = 50, message = "user.validation.name.size")
     @Pattern(regexp = "^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "user.validation.name.format")
     @Column(name = "name", nullable = false, length = 50)
     private String name;
-    
+
     @NotBlank(message = "user.validation.lastName.required")
     @Size(min = 2, max = 50, message = "user.validation.lastName.size")
     @Pattern(regexp = "^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "user.validation.lastName.format")
@@ -61,7 +62,7 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @Past(message = "user.validation.dateOfBirth.past")
     @Column(name = "date_of_birth")
     private LocalDate dateOfBirth;
-    
+
     @NotBlank(message = "user.validation.email.required")
     @Email(message = "user.validation.email.format")
     @Size(max = 100, message = "user.validation.email.size")
@@ -72,7 +73,7 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @Pattern(regexp = "^[+]?[0-9]{10,15}$", message = "user.validation.phoneNumber.format")
     @Column(name = "phone_number", length = 20)
     private String phoneNumber;
-    
+
     @NotBlank(message = "user.validation.password.required")
     @Size(min = 8, max = 100, message = "user.validation.password.size")
     @Column(name = "password", nullable = false, length = 255)
@@ -89,63 +90,57 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private EnumStatus status = EnumStatus.INACTIVE;
-      
+
     @Column(name = "token", length = 500)
     private String token;
-    
+
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
-    
+
+    @Column(name = "refresh_token", length = 500)
+    private String refreshToken;
+
+    @Column(name = "refresh_token_expiry")
+    private LocalDateTime refreshTokenExpiry;
+
     @Column(name = "verification_token", length = 500)
     private String verificationToken;
-    
+
     @Column(name = "verification_token_expiry")
     private LocalDateTime verificationTokenExpiry;
 
-    @Column(name = "code_activation", length = 6)
-    private String codeActivation;
-
-    @Column(name = "code_activation_expiry")
-    private LocalDateTime codeActivationExpiry;
-    
-    @Column(name = "code_reset_password", length = 6)
-    private String codeResetPassword;
-    
-    @Column(name = "code_reset_password_expiry")
-    private LocalDateTime codeResetPasswordExpiry;
-    
     @Column(name = "failed_login_attempts", nullable = false)
     @Builder.Default
     private Integer failedLoginAttempts = 0;
-    
+
     @Column(name = "account_locked_until")
     private LocalDateTime accountLockedUntil;
-    
+
     @Column(name = "password_changed_at")
     private LocalDateTime passwordChangedAt;
-    
+
     @Column(name = "email_verified", nullable = false)
     @Builder.Default
     private Boolean emailVerified = false;
-    
+
     @Column(name = "phone_verified", nullable = false)
     @Builder.Default
     private Boolean phoneVerified = false;
-    
+
     @Column(name = "last_ip_address", length = 45)
     private String lastIpAddress;
-    
+
     @Column(name = "user_agent", length = 500)
     private String userAgent;
-    
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @Builder.Default
     private List<Order> orders = Collections.emptyList();
-    
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @Builder.Default
     private List<Address> addresses = Collections.emptyList();
-    
+
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private Cart cart;
 
@@ -155,24 +150,23 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @Builder.Default
     private List<Review> reviews = Collections.emptyList();
-    
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @Builder.Default
     private List<Rating> ratings = Collections.emptyList();
-    
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @Builder.Default
     private List<Favorite> favorites = Collections.emptyList();
-    
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @Builder.Default
     private List<Notification> notifications = Collections.emptyList();
-    
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @Builder.Default
     private List<Coupon> personalCoupons = Collections.emptyList();
-    
-    
+
     // Spring Security UserDetails implementation
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
@@ -196,35 +190,33 @@ public class User extends BaseAuditableEntity implements UserDetails {
 
     @Override
     public boolean isCredentialsNonExpired() {
-        return passwordChangedAt == null || 
-               passwordChangedAt.isAfter(LocalDateTime.now().minusMonths(6));
+        return passwordChangedAt == null ||
+                passwordChangedAt.isAfter(LocalDateTime.now().minusMonths(6));
     }
 
     @Override
     public boolean isEnabled() {
         return status == EnumStatus.ACTIVE && Boolean.TRUE.equals(emailVerified);
     }
-    
+
     // Business methods
     public String getFullName() {
-        return String.format("%s %s", 
-            Objects.requireNonNullElse(name, ""), 
-            Objects.requireNonNullElse(lastName, "")).trim();
+        return String.format("%s %s",
+                Objects.requireNonNullElse(name, ""),
+                Objects.requireNonNullElse(lastName, "")).trim();
     }
-    
+
     public String getInitials() {
-        String firstInitial = name != null && !name.isEmpty() ? 
-            String.valueOf(name.charAt(0)).toUpperCase() : "";
-        String lastInitial = lastName != null && !lastName.isEmpty() ? 
-            String.valueOf(lastName.charAt(0)).toUpperCase() : "";
+        String firstInitial = name != null && !name.isEmpty() ? String.valueOf(name.charAt(0)).toUpperCase() : "";
+        String lastInitial = lastName != null && !lastName.isEmpty() ? String.valueOf(lastName.charAt(0)).toUpperCase()
+                : "";
         return firstInitial + lastInitial;
     }
 
     public Integer getAge() {
-        return dateOfBirth != null ? 
-            Period.between(dateOfBirth, LocalDate.now()).getYears() : null;
+        return dateOfBirth != null ? Period.between(dateOfBirth, LocalDate.now()).getYears() : null;
     }
-    
+
     public boolean isMinor() {
         Integer age = getAge();
         return age != null && age < 18;
@@ -234,59 +226,50 @@ public class User extends BaseAuditableEntity implements UserDetails {
     public boolean isAdmin() {
         return role == EnumRole.ADMIN;
     }
-    
+
     public boolean isUser() {
         return role == EnumRole.USER;
     }
-    
+
     public boolean isSeller() {
         return role == EnumRole.SELLER;
     }
-    
+
     // Status checking methods
     public boolean isActive() {
         return status == EnumStatus.ACTIVE;
     }
-    
+
     public boolean isInactive() {
         return status == EnumStatus.INACTIVE;
     }
 
-    // Token and code validation methods
-    public boolean isActivationCodeExpired() {
-        return codeActivationExpiry != null && 
-               codeActivationExpiry.isBefore(LocalDateTime.now());
-    }
-    
+  
+
     public boolean isTokenExpired() {
-        return verificationTokenExpiry != null && 
-               verificationTokenExpiry.isBefore(LocalDateTime.now());
+        return verificationTokenExpiry != null &&
+                verificationTokenExpiry.isBefore(LocalDateTime.now());
     }
-    
-    public boolean isResetTokenExpired() {
-        return codeResetPasswordExpiry != null && 
-               codeResetPasswordExpiry.isBefore(LocalDateTime.now());
-    }
-    
+
     public boolean isAccountTemporarilyLocked() {
-        return accountLockedUntil != null && 
-               accountLockedUntil.isAfter(LocalDateTime.now());
+        return accountLockedUntil != null &&
+                accountLockedUntil.isAfter(LocalDateTime.now());
     }
-    
+
     // Security methods
     public void incrementFailedLoginAttempts() {
         this.failedLoginAttempts = Objects.requireNonNullElse(this.failedLoginAttempts, 0) + 1;
     }
-    
+
     public void resetFailedLoginAttempts() {
         this.failedLoginAttempts = 0;
         this.accountLockedUntil = null;
     }
-    
+
     public void lockAccount(int minutesToLock) {
         this.accountLockedUntil = LocalDateTime.now().plusMinutes(minutesToLock);
     }
-    
+
     // Verification methods
     public void markEmailAsVerified() {
         this.emailVerified = true;
@@ -294,28 +277,18 @@ public class User extends BaseAuditableEntity implements UserDetails {
         this.verificationToken = null;
         this.verificationTokenExpiry = null;
     }
-    
+
     public void markPhoneAsVerified() {
         this.phoneVerified = true;
     }
-    
+
     // Cleanup methods
-    public void clearActivationCode() {
-        this.codeActivation = null;
-        this.codeActivationExpiry = null;
-    }
-    
-    public void clearResetPasswordCode() {
-        this.codeResetPassword = null;
-        this.codeResetPasswordExpiry = null;
-    }
-    
     public void updateLastLogin(String ipAddress, String userAgent) {
         this.lastLogin = LocalDateTime.now();
         this.lastIpAddress = ipAddress;
         this.userAgent = userAgent;
     }
-    
+
     // JPA lifecycle methods
     @PrePersist
     protected void onCreate() {
@@ -340,5 +313,45 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @PreUpdate
     protected void onUpdate() {
         super.onUpdate();
+    }
+
+    /**
+     * Verifica si el refresh token ha expirado
+     */
+    public boolean isRefreshTokenExpired() {
+        return refreshTokenExpiry != null &&
+                refreshTokenExpiry.isBefore(LocalDateTime.now());
+    }
+
+    /**
+     * Verifica si el refresh token es válido (no nulo, no vacío, no expirado)
+     */
+    public boolean isRefreshTokenValid() {
+        return refreshToken != null &&
+                !refreshToken.trim().isEmpty() &&
+                !isRefreshTokenExpired();
+    }
+
+    /**
+     * Limpia el refresh token y su fecha de expiración
+     */
+    public void clearRefreshToken() {
+        this.refreshToken = null;
+        this.refreshTokenExpiry = null;
+    }
+
+    /**
+     * Establece un nuevo refresh token con su fecha de expiración
+     */
+    public void setRefreshTokenWithExpiry(String refreshToken, LocalDateTime expiry) {
+        this.refreshToken = refreshToken;
+        this.refreshTokenExpiry = expiry;
+    }
+
+    /**
+     * Verifica si el refresh token proporcionado coincide con el almacenado
+     */
+    public boolean matchesRefreshToken(String tokenToCheck) {
+        return refreshToken != null && refreshToken.equals(tokenToCheck);
     }
 }

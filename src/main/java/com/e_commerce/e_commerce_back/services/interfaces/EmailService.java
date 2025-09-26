@@ -44,4 +44,13 @@ public interface EmailService {
      * @param user Usuario que cambió su contraseña
      */
     void sendPasswordChangedNotification(User user);
+
+    /**
+     * Envía un email de solicitud de desbloqueo inmediato
+     * @param user Usuario al que se enviará el email
+     */
+    void sendUnlockCode(User user, String unlockCode);
+
+
+    
 }
