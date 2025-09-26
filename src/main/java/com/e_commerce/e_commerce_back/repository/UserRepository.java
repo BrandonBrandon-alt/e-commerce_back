@@ -22,8 +22,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
     // Verificar si existe un email
     boolean existsByEmail(String email);
     
-    // Buscar por token de verificación
-    Optional<User> findByVerificationToken(String token);
     
     // Buscar usuarios activos (usando status y emailVerified)
     @Query("SELECT u FROM User u WHERE u.status = 'ACTIVE' AND u.emailVerified = true")
