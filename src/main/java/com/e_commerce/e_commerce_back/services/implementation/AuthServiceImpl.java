@@ -5,7 +5,6 @@ import com.e_commerce.e_commerce_back.entity.User;
 import com.e_commerce.e_commerce_back.exception.EmailIsExists;
 import com.e_commerce.e_commerce_back.exception.IdNumberIsExists;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
-import com.e_commerce.e_commerce_back.security.CustomUserDetailsService;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
 import com.e_commerce.e_commerce_back.services.interfaces.AuthService;
 import com.e_commerce.e_commerce_back.services.interfaces.EmailService;
@@ -14,6 +13,8 @@ import com.e_commerce.enums.EnumStatus;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -50,7 +51,6 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final EmailService emailService;
-    private final CustomUserDetailsService userDetailsService;
 
     @Value("${app.jwt.expiration}")
     private Long jwtExpiration;
@@ -129,10 +129,6 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
-    /**
-     * Implementación del servicio de activación de cuenta
-     * Maneja la activación de la cuenta de un usuario
-     */
     @Override
     public AuthResponseDTO activateAccount(ActivateAccountDTO activateAccountDTO) {
         log.info("Procesando activación de cuenta para email: {}", activateAccountDTO.email());
@@ -147,13 +143,15 @@ public class AuthServiceImpl implements AuthService {
                 return AuthResponseDTO.error("La cuenta ya está activada");
             }
 
+            // ✅ Verificar código de activación desde Redis
             if (!tokenRedisService.verifyActivationCode(user.getId(), activateAccountDTO.activationCode())) {
                 log.warn("Código de activación inválido o expirado para usuario: {}", activateAccountDTO.email());
                 return AuthResponseDTO.error("Código de activación incorrecto o expirado");
             }
 
             // Activar la cuenta
-            user.markEmailAsVerified();
+            user.setStatus(EnumStatus.ACTIVE); // ✅ Cambiar status también
+            user.setEmailVerified(true); // ✅ Marcar email como verificado
 
             // Guardar cambios
             userRepository.save(user);
@@ -165,9 +163,7 @@ public class AuthServiceImpl implements AuthService {
                 emailService.sendWelcomeEmail(user);
                 log.info("Email de bienvenida enviado a: {}", user.getEmail());
             } catch (Exception e) {
-                log.error("Error enviando email de bienvenida a {}: {}",
-                        user.getEmail(), e.getMessage());
-                // No fallar la activación si el email falla
+                log.error("Error enviando email de bienvenida a {}: {}", user.getEmail(), e.getMessage());
             }
 
             return AuthResponseDTO.success("¡Cuenta activada exitosamente! Ya puedes iniciar sesión.");
@@ -345,17 +341,27 @@ public class AuthServiceImpl implements AuthService {
             String token = extractTokenFromHeader(authHeader);
 
             if (token != null) {
-                // En una implementación más avanzada, aquí se podría:
-                // 1. Agregar el token a una blacklist en Redis
-                // 2. Almacenar tokens invalidados con TTL
-                // 3. Usar un mecanismo de revocación de tokens
-
                 try {
-                    // Intentar extraer username del token
+                    // Extraer username del token
                     String username = jwtUtil.extractUsername(token);
-                    log.info("Logout procesado para usuario: {}", username);
+
+                    // Buscar el usuario para obtener su ID
+                    Optional<User> userOpt = userRepository.findByEmail(username);
+                    if (userOpt.isPresent()) {
+                        Long userId = userOpt.get().getId();
+
+                        // Revocar el refresh token de Redis
+                        tokenRedisService.revokeRefreshToken(userId);
+
+                        // Opcional: Agregar access token a blacklist en Redis
+                        tokenRedisService.blacklistAccessToken(token);
+
+                        log.info("Logout completo para usuario: {} (ID: {})", username, userId);
+                    } else {
+                        log.warn("Usuario no encontrado durante logout: {}", username);
+                    }
+
                 } catch (Exception tokenException) {
-                    // Si el token es inválido, solo logeamos el intento de logout
                     log.warn("Intento de logout con token inválido: {}", tokenException.getMessage());
                 }
 
@@ -367,7 +373,6 @@ public class AuthServiceImpl implements AuthService {
 
         } catch (Exception e) {
             log.error("Error en logout: {}", e.getMessage());
-            // No lanzar excepción para logout - es mejor ser permisivo
             log.warn("Logout completado a pesar del error");
         }
     }
@@ -621,28 +626,16 @@ public class AuthServiceImpl implements AuthService {
                 throw new SecurityException("Usuario inactivo");
             }
 
-            // 6. Verificar que el refresh token coincide con el almacenado en BD
-            if (!user.matchesRefreshToken(refreshToken)) {
-                throw new SecurityException("Refresh token no válido");
+            // 6. Verificar refresh token desde Redis (esto lo consume automáticamente)
+            if (!tokenRedisService.verifyRefreshToken(user.getId(), refreshToken)) {
+                throw new SecurityException("Refresh token no válido o expirado");
             }
 
-            // 7. Verificar que el refresh token no ha expirado en BD
-            if (user.isRefreshTokenExpired()) {
-                user.clearRefreshToken();
-                userRepository.save(user);
-                throw new SecurityException("Refresh token expirado");
-            }
-
-            // 8. Generar nuevos tokens
+            // 7. Generar nuevos tokens
             String newAccessToken = jwtUtil.generateAccessToken(user);
-            String newRefreshToken = jwtUtil.generateRefreshToken(user);
+            String newRefreshToken = tokenRedisService.generateAndStoreRefreshToken(user.getId());
 
-            // 9. Actualizar el refresh token en la base de datos
-            LocalDateTime newExpiry = LocalDateTime.now().plusDays(jwtUtil.getRefreshTokenExpirationDays());
-            user.setRefreshTokenWithExpiry(newRefreshToken, newExpiry);
-            userRepository.save(user);
-
-            // 10. Construir y retornar la respuesta
+            // 8. Construir y retornar la respuesta
             return AuthResponseDTO.builder()
                     .accessToken(newAccessToken)
                     .refreshToken(newRefreshToken)
@@ -796,30 +789,30 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO requestImmediateUnlock(RequestImmediateUnlockDTO requestImmediateUnlockDTO) {
         try {
             User user = userRepository.findByEmail(requestImmediateUnlockDTO.email()).orElse(null);
-            
+
             if (user == null) {
                 return AuthResponseDTO.success("Si el correo es válido y está bloqueado, recibirás un código");
             }
-            
+
             // Verificar que esté realmente bloqueado
             if (user.getFailedLoginAttempts() < maxFailedAttempts) {
                 return AuthResponseDTO.success("Si el correo es válido y está bloqueado, recibirás un código");
             }
-            
+
             // Rate limiting
             if (!tokenRedisService.canRequestToken(user.getId(), "unlock")) {
                 return AuthResponseDTO.error("Demasiadas solicitudes. Intenta en 1 hora");
             }
-            
+
             // Generar código y almacenar en Redis
             String unlockCode = tokenRedisService.generateAndStoreUnlockCode(user.getId());
-            
+
             // Enviar email
             emailService.sendUnlockCode(user, unlockCode);
-            
+
             log.info("Unlock code sent to user: {}", user.getEmail());
             return AuthResponseDTO.success("Código de desbloqueo enviado a tu email");
-            
+
         } catch (Exception e) {
             log.error("Error al solicitar desbloqueo inmediato: {}", e.getMessage(), e);
             return AuthResponseDTO.error("Error al enviar el código");
@@ -830,20 +823,20 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO verifyUnlockCode(VerifyUnlockCodeDTO verifyUnlockCodeDTO) {
         try {
             User user = userRepository.findByEmail(verifyUnlockCodeDTO.email())
-                .orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado"));
-            
+                    .orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado"));
+
             // Verificar código desde Redis
             if (!tokenRedisService.verifyUnlockCode(user.getId(), verifyUnlockCodeDTO.code())) {
                 return AuthResponseDTO.error("Código inválido o expirado");
             }
-            
+
             // Desbloquear cuenta
             user.resetFailedLoginAttempts();
             userRepository.save(user);
-            
+
             log.info("Account unlocked via email verification: {}", user.getEmail());
             return AuthResponseDTO.success("Cuenta desbloqueada exitosamente");
-            
+
         } catch (Exception e) {
             log.error("Error verifying unlock code: {}", e.getMessage(), e);
             return AuthResponseDTO.error("Error al verificar el código");

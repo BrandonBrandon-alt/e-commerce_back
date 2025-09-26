@@ -4,8 +4,11 @@ import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
+
+import com.e_commerce.e_commerce_back.services.implementation.TokenRedisService;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
@@ -21,6 +24,9 @@ import java.util.function.Function;
 @Slf4j
 public class JwtUtil {
 
+    @Autowired
+    private TokenRedisService tokenRedisService;
+
     @Value("${app.jwt.secret}")
     private String secret;
 
@@ -33,6 +39,7 @@ public class JwtUtil {
     /**
      * Genera la clave secreta para firmar los tokens
      */
+
     private SecretKey getSigningKey() {
         return Keys.hmacShaKeyFor(secret.getBytes());
     }
@@ -40,6 +47,7 @@ public class JwtUtil {
     /**
      * Extrae el username del token
      */
+
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
     }
@@ -47,6 +55,7 @@ public class JwtUtil {
     /**
      * Extrae la fecha de expiración del token
      */
+
     public Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
     }
@@ -54,6 +63,7 @@ public class JwtUtil {
     /**
      * Extrae un claim específico del token
      */
+
     public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
         final Claims claims = extractAllClaims(token);
         return claimsResolver.apply(claims);
@@ -62,6 +72,7 @@ public class JwtUtil {
     /**
      * Extrae todos los claims del token
      */
+
     private Claims extractAllClaims(String token) {
         try {
             return Jwts.parserBuilder()
@@ -90,6 +101,7 @@ public class JwtUtil {
     /**
      * Verifica si el token ha expirado
      */
+
     public Boolean isTokenExpired(String token) {
         return extractExpiration(token).before(new Date());
     }
@@ -97,6 +109,7 @@ public class JwtUtil {
     /**
      * Genera un token para el usuario
      */
+
     public String generateToken(UserDetails userDetails) {
         Map<String, Object> claims = new HashMap<>();
         return createToken(claims, userDetails.getUsername());
@@ -105,6 +118,7 @@ public class JwtUtil {
     /**
      * Genera un token con claims adicionales
      */
+
     public String generateToken(UserDetails userDetails, Map<String, Object> extraClaims) {
         Map<String, Object> claims = new HashMap<>(extraClaims);
         return createToken(claims, userDetails.getUsername());
@@ -113,6 +127,7 @@ public class JwtUtil {
     /**
      * Crea el token JWT
      */
+
     private String createToken(Map<String, Object> claims, String subject) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + expiration);
@@ -129,8 +144,16 @@ public class JwtUtil {
     /**
      * Valida el token
      */
+
     public Boolean validateToken(String token, UserDetails userDetails) {
         try {
+
+            // En tu JwtAuthenticationFilter, antes de validar el token:
+            if (tokenRedisService.isTokenBlacklisted(token)) {
+                log.warn("Token en blacklist detectado");
+                return false; // O manejar como token inválido
+            }
+
             final String username = extractUsername(token);
             return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
         } catch (Exception e) {
@@ -176,6 +199,7 @@ public class JwtUtil {
     /**
      * Crea el refresh token JWT con mayor tiempo de expiración
      */
+
     private String createRefreshToken(Map<String, Object> claims, String subject) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + refreshExpiration);
@@ -215,6 +239,7 @@ public class JwtUtil {
     /**
      * Genera un access token (método específico para diferenciarlo del refresh)
      */
+
     public String generateAccessToken(UserDetails userDetails) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("type", "access"); // Identificador del tipo de token
@@ -224,6 +249,7 @@ public class JwtUtil {
     /**
      * Valida que el token sea un access token válido
      */
+
     public Boolean isValidAccessToken(String token) {
         try {
             Claims claims = extractAllClaims(token);

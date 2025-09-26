@@ -31,9 +31,8 @@ import java.util.Objects;
 @NoArgsConstructor
 @AllArgsConstructor
 @SuperBuilder
-@ToString(exclude = { "password", "token", "verificationToken", "codeActivation", "codeResetPassword", "orders",
+@ToString(exclude = { "password", "token", "orders",
         "addresses", "cart" })
-@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class User extends BaseAuditableEntity implements UserDetails {
 
     @Id
@@ -96,18 +95,6 @@ public class User extends BaseAuditableEntity implements UserDetails {
 
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
-
-    @Column(name = "refresh_token", length = 500)
-    private String refreshToken;
-
-    @Column(name = "refresh_token_expiry")
-    private LocalDateTime refreshTokenExpiry;
-
-    @Column(name = "verification_token", length = 500)
-    private String verificationToken;
-
-    @Column(name = "verification_token_expiry")
-    private LocalDateTime verificationTokenExpiry;
 
     @Column(name = "failed_login_attempts", nullable = false)
     @Builder.Default
@@ -244,13 +231,6 @@ public class User extends BaseAuditableEntity implements UserDetails {
         return status == EnumStatus.INACTIVE;
     }
 
-  
-
-    public boolean isTokenExpired() {
-        return verificationTokenExpiry != null &&
-                verificationTokenExpiry.isBefore(LocalDateTime.now());
-    }
-
     public boolean isAccountTemporarilyLocked() {
         return accountLockedUntil != null &&
                 accountLockedUntil.isAfter(LocalDateTime.now());
@@ -268,14 +248,6 @@ public class User extends BaseAuditableEntity implements UserDetails {
 
     public void lockAccount(int minutesToLock) {
         this.accountLockedUntil = LocalDateTime.now().plusMinutes(minutesToLock);
-    }
-
-    // Verification methods
-    public void markEmailAsVerified() {
-        this.emailVerified = true;
-        this.status = EnumStatus.ACTIVE;
-        this.verificationToken = null;
-        this.verificationTokenExpiry = null;
     }
 
     public void markPhoneAsVerified() {
@@ -313,45 +285,5 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @PreUpdate
     protected void onUpdate() {
         super.onUpdate();
-    }
-
-    /**
-     * Verifica si el refresh token ha expirado
-     */
-    public boolean isRefreshTokenExpired() {
-        return refreshTokenExpiry != null &&
-                refreshTokenExpiry.isBefore(LocalDateTime.now());
-    }
-
-    /**
-     * Verifica si el refresh token es válido (no nulo, no vacío, no expirado)
-     */
-    public boolean isRefreshTokenValid() {
-        return refreshToken != null &&
-                !refreshToken.trim().isEmpty() &&
-                !isRefreshTokenExpired();
-    }
-
-    /**
-     * Limpia el refresh token y su fecha de expiración
-     */
-    public void clearRefreshToken() {
-        this.refreshToken = null;
-        this.refreshTokenExpiry = null;
-    }
-
-    /**
-     * Establece un nuevo refresh token con su fecha de expiración
-     */
-    public void setRefreshTokenWithExpiry(String refreshToken, LocalDateTime expiry) {
-        this.refreshToken = refreshToken;
-        this.refreshTokenExpiry = expiry;
-    }
-
-    /**
-     * Verifica si el refresh token proporcionado coincide con el almacenado
-     */
-    public boolean matchesRefreshToken(String tokenToCheck) {
-        return refreshToken != null && refreshToken.equals(tokenToCheck);
     }
 }
