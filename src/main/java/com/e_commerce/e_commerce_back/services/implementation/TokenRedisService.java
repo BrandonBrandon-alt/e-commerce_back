@@ -81,6 +81,21 @@ public class TokenRedisService {
         return true;
     }
 
+    public Long getUserIdByResetCode(String resetCode) {
+        String key = "reset_code:" + resetCode;
+        String storedUserId = redisTemplate.opsForValue().get(key);
+    
+        if (storedUserId == null) {
+            log.warn("Reset code not found in Redis: {}", resetCode);
+            return null; // Código inválido o expirado
+        }
+        
+        // (Opcional pero recomendado) Consumir el código para que sea de un solo uso
+        // redisTemplate.delete(key); 
+    
+        return Long.parseLong(storedUserId);
+    }
+
     // ================= RESET PASSWORD CODE =================
 
     /**
@@ -153,6 +168,21 @@ public class TokenRedisService {
         redisTemplate.delete(key);
         log.info("Unlock code verified and consumed for user: {}", userId);
         return true;
+    }
+    
+    public Long getUserIdByUnlockCode(String unlockCode) {
+        String key = "unlock_code:" + unlockCode;
+        String storedUserId = redisTemplate.opsForValue().get(key);
+    
+        if (storedUserId == null) {
+            log.warn("Unlock code not found in Redis: {}", unlockCode);
+            return null; // Código inválido o expirado
+        }
+        
+        // (Opcional pero recomendado) Consumir el código para que sea de un solo uso
+        // redisTemplate.delete(key); 
+    
+        return Long.parseLong(storedUserId);
     }
 
     /**

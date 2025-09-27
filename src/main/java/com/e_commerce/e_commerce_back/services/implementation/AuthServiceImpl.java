@@ -69,7 +69,7 @@ public class AuthServiceImpl implements AuthService {
      */
 
     @Override
-    public AuthResponseDTO register(RegisterUserDTO createUserDTO) {
+    public AuthResponseDTO register(RegisterUserDTO createUserDTO) { //✅
         log.info("Procesando registro para email: {}", createUserDTO.email());
 
         try {
@@ -130,7 +130,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public AuthResponseDTO activateAccount(ActivateAccountDTO activateAccountDTO) {
+    public AuthResponseDTO activateAccount(ActivateAccountDTO activateAccountDTO) { //✅
         log.info("Procesando activación de cuenta para email: {}", activateAccountDTO.email());
 
         try {
@@ -143,15 +143,14 @@ public class AuthServiceImpl implements AuthService {
                 return AuthResponseDTO.error("La cuenta ya está activada");
             }
 
-            // ✅ Verificar código de activación desde Redis
             if (!tokenRedisService.verifyActivationCode(user.getId(), activateAccountDTO.activationCode())) {
                 log.warn("Código de activación inválido o expirado para usuario: {}", activateAccountDTO.email());
                 return AuthResponseDTO.error("Código de activación incorrecto o expirado");
             }
 
             // Activar la cuenta
-            user.setStatus(EnumStatus.ACTIVE); // ✅ Cambiar status también
-            user.setEmailVerified(true); // ✅ Marcar email como verificado
+            user.setStatus(EnumStatus.ACTIVE);
+            user.setEmailVerified(true);
 
             // Guardar cambios
             userRepository.save(user);
@@ -183,7 +182,7 @@ public class AuthServiceImpl implements AuthService {
      */
 
     @Override
-    public AuthResponseDTO login(LoginDTO loginDTO) {
+    public AuthResponseDTO login(LoginDTO loginDTO) { //✅
         log.info("Procesando login para email: {}", loginDTO.email());
 
         try {
@@ -233,6 +232,13 @@ public class AuthServiceImpl implements AuthService {
                         user.getLastIpAddress(),
                         0); // Ya se resetearon
 
+                // Imprimir el token de acceso en consola para pruebas manuales de APIs
+                // Nota: evitar en producción; es solo para propósitos de testing local.
+                log.info("Access Token (copia para probar APIs): Bearer {}", token);
+                System.out.println("\n================= ACCESS TOKEN =================\n" +
+                                   "Bearer " + token + "\n" +
+                                   "================================================\n");
+
                 return AuthResponseDTO.success(token, jwtExpiration, userInfo);
 
             } catch (BadCredentialsException e) {
@@ -278,7 +284,7 @@ public class AuthServiceImpl implements AuthService {
      */
 
     @Override
-    public TokenValidationDTO validateToken(String authHeader) {
+    public TokenValidationDTO validateToken(String authHeader) { //✅
         try {
             String token = extractTokenFromHeader(authHeader);
 
@@ -315,7 +321,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional(readOnly = true)
-    public UserInfoDTO getCurrentUserInfo() {
+    public UserInfoDTO getCurrentUserInfo() { //✅
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
         if (authentication == null || !authentication.isAuthenticated()) {
@@ -336,7 +342,7 @@ public class AuthServiceImpl implements AuthService {
      */
 
     @Override
-    public void logout(String authHeader) {
+    public void logout(String authHeader) { //✅
         try {
             String token = extractTokenFromHeader(authHeader);
 
@@ -486,12 +492,12 @@ public class AuthServiceImpl implements AuthService {
      */
 
     @Override
-    public AuthResponseDTO resendActivationCode(String email) {
-        log.info("Procesando reenvío de código de activación para email: {}", email);
+    public AuthResponseDTO resendActivationCode(ResendActivationCodeDTO resendActivationCodeDTO) {
+        log.info("Procesando reenvío de código de activación para email: {}", resendActivationCodeDTO.email());
 
         try {
             // Buscar usuario por email
-            User user = userRepository.findByEmail(email)
+            User user = userRepository.findByEmail(resendActivationCodeDTO.email())
                     .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 
             // Verificar si la cuenta ya está activada
@@ -505,7 +511,7 @@ public class AuthServiceImpl implements AuthService {
             }
 
             String newActivationCode = tokenRedisService.generateAndStoreActivationCode(user.getId());
-            log.info("Nuevo código de activación generado para usuario: {}", email);
+            log.info("Nuevo código de activación generado para usuario: {}", resendActivationCodeDTO.email());
 
             // Enviar nuevo email de activación
             try {
@@ -521,10 +527,10 @@ public class AuthServiceImpl implements AuthService {
                     "Nuevo código de activación enviado. Revisa tu email.");
 
         } catch (UsernameNotFoundException e) {
-            log.warn("Intento de reenvío con email no registrado: {}", email);
+            log.warn("Intento de reenvío con email no registrado: {}", resendActivationCodeDTO.email());
             return AuthResponseDTO.error("Usuario no encontrado");
         } catch (Exception e) {
-            log.error("Error en reenvío para email: {}, error: {}", email, e.getMessage());
+            log.error("Error en reenvío para email: {}, error: {}", resendActivationCodeDTO.email(), e.getMessage());
             return AuthResponseDTO.error("Error interno del servidor");
         }
     }
@@ -567,34 +573,39 @@ public class AuthServiceImpl implements AuthService {
      * Implementación del servicio de reseteo de contraseña
      */
 
-    @Override
-    public AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO) {
-        try {
-            User user = userRepository.findByEmail(resetPasswordDTO.email())
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-
-            if (!tokenRedisService.verifyResetCode(user.getId(), resetPasswordDTO.resetCode())) {
-                log.warn("Código de reset inválido o expirado para usuario: {}", resetPasswordDTO.email());
-                return AuthResponseDTO.error("Código de reset incorrecto o expirado");
-            }
-
-            if (!resetPasswordDTO.passwordsMatch()) {
-                return AuthResponseDTO.error("Las contraseñas no coinciden");
-            }
-
-            user.setPassword(passwordEncoder.encode(resetPasswordDTO.password()));
-
-            userRepository.save(user);
-
-            return AuthResponseDTO.success("Contraseña restablecida exitosamente");
-
-        } catch (Exception e) {
-            log.error("Error al restablecer contraseña para email: {}, error: {}",
-                    resetPasswordDTO.email(), e.getMessage());
-            return AuthResponseDTO.error("Error interno del servidor");
-        }
-
-    }
+     @Override
+     public AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO) {
+         try {
+             // 1. Obtener userId. Esta es la ÚNICA verificación necesaria.
+             Long userId = tokenRedisService.getUserIdByResetCode(resetPasswordDTO.resetCode());
+     
+             // 2. Comprobar si el código fue válido.
+             if (userId == null) {
+                 log.warn("Intento de reseteo con código inválido o expirado: {}", resetPasswordDTO.resetCode());
+                 return AuthResponseDTO.error("Código de reseteo incorrecto o expirado");
+             }
+     
+             User user = userRepository.findById(userId)
+                     .orElseThrow(() -> new UsernameNotFoundException("Usuario asociado al código no encontrado"));
+     
+             if (!resetPasswordDTO.passwordsMatch()) {
+                 return AuthResponseDTO.error("Las contraseñas no coinciden");
+             }
+     
+             user.setPassword(passwordEncoder.encode(resetPasswordDTO.password()));
+             userRepository.save(user);
+             
+             // (Recomendado) Asegúrate de que el código se eliminó en getUserIdByResetCode
+             // para que no pueda ser reutilizado.
+     
+             return AuthResponseDTO.success("Contraseña restablecida exitosamente");
+     
+         } catch (Exception e) {
+             log.error("Error al restablecer contraseña con código: {}, error: {}",
+                     resetPasswordDTO.resetCode(), e.getMessage());
+             return AuthResponseDTO.error("Error interno del servidor");
+         }
+     }
 
     /**
      * Implementación del servicio de refresco de token
@@ -822,15 +833,14 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public AuthResponseDTO verifyUnlockCode(VerifyUnlockCodeDTO verifyUnlockCodeDTO) {
         try {
-            User user = userRepository.findByEmail(verifyUnlockCodeDTO.email())
-                    .orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado"));
-
+            Long userId = tokenRedisService.getUserIdByUnlockCode(verifyUnlockCodeDTO.code());
+            
             // Verificar código desde Redis
-            if (!tokenRedisService.verifyUnlockCode(user.getId(), verifyUnlockCodeDTO.code())) {
+            if (!tokenRedisService.verifyUnlockCode(userId, verifyUnlockCodeDTO.code())) {
                 return AuthResponseDTO.error("Código inválido o expirado");
             }
-
             // Desbloquear cuenta
+            User user = userRepository.findById(userId).orElse(null);
             user.resetFailedLoginAttempts();
             userRepository.save(user);
 

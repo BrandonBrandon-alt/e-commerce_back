@@ -179,7 +179,7 @@ public class AuthController {
         log.info("Intento de reenvío de código para email: {}", resendDTO.email());
         
         try {
-            AuthResponseDTO response = authService.resendActivationCode(resendDTO.email());
+            AuthResponseDTO response = authService.resendActivationCode(resendDTO);
             log.info("Reenvío procesado para email: {}", resendDTO.email());
             return ResponseEntity.ok(response);
             
@@ -188,5 +188,210 @@ public class AuthController {
                      resendDTO.email(), e.getMessage());
             throw e;
         }
+    }
+
+    /**
+     * Endpoint para solicitar reseteo de contraseña
+     */
+    @PostMapping("/forgot-password")
+    @Operation(summary = "Olvidé mi contraseña", description = "Solicita un código de reseteo de contraseña por email")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Código enviado exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos"),
+            @ApiResponse(responseCode = "429", description = "Demasiadas solicitudes")
+    })
+    public ResponseEntity<AuthResponseDTO> forgotPassword(@Valid @RequestBody ForgotPasswordDTO forgotPasswordDTO) {
+        log.info("Solicitud de reseteo de contraseña para email: {}", forgotPasswordDTO.email());
+        
+        try {
+            AuthResponseDTO response = authService.forgotPassword(forgotPasswordDTO);
+            log.info("Solicitud de reseteo procesada para email: {}", forgotPasswordDTO.email());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error en solicitud de reseteo para email: {}, error: {}", 
+                     forgotPasswordDTO.email(), e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para resetear contraseña con código
+     */
+    @PostMapping("/reset-password")
+    @Operation(summary = "Resetear contraseña", description = "Resetea la contraseña usando el código recibido por email")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Contraseña restablecida exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Código inválido o expirado"),
+            @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
+    })
+    public ResponseEntity<AuthResponseDTO> resetPassword(@Valid @RequestBody ResetPasswordDTO resetPasswordDTO) {
+        log.info("Intento de reseteo de contraseña con código");
+        
+        try {
+            AuthResponseDTO response = authService.resetPassword(resetPasswordDTO);
+            log.info("Reseteo de contraseña exitoso");
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error en reseteo de contraseña: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para refrescar token de acceso
+     */
+    @PostMapping("/refresh-token")
+    @Operation(summary = "Refrescar token", description = "Obtiene un nuevo access token usando el refresh token")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Token refrescado exitosamente"),
+            @ApiResponse(responseCode = "401", description = "Refresh token inválido"),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos")
+    })
+    public ResponseEntity<AuthResponseDTO> refreshToken(@Valid @RequestBody RefreshTokenDTO refreshTokenDTO) {
+        log.debug("Solicitud de refresh token");
+        
+        try {
+            AuthResponseDTO response = authService.refreshToken(refreshTokenDTO);
+            log.info("Token refrescado exitosamente");
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error refrescando token: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para cambiar contraseña (requiere autenticación)
+     */
+    @PostMapping("/change-password")
+    @Operation(summary = "Cambiar contraseña", description = "Cambia la contraseña del usuario autenticado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Contraseña cambiada exitosamente"),
+            @ApiResponse(responseCode = "401", description = "No autenticado o contraseña actual incorrecta"),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos")
+    })
+    public ResponseEntity<AuthResponseDTO> changePassword(@Valid @RequestBody ChangePasswordDTO changePasswordDTO) {
+        log.info("Solicitud de cambio de contraseña");
+        
+        try {
+            AuthResponseDTO response = authService.changePassword(changePasswordDTO);
+            log.info("Contraseña cambiada exitosamente");
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error cambiando contraseña: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para cambiar email (requiere autenticación)
+     */
+    @PostMapping("/change-email")
+    @Operation(summary = "Cambiar email", description = "Cambia el email del usuario autenticado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Email cambiado exitosamente"),
+            @ApiResponse(responseCode = "401", description = "No autenticado o contraseña incorrecta"),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos"),
+            @ApiResponse(responseCode = "409", description = "El nuevo email ya está en uso")
+    })
+    public ResponseEntity<AuthResponseDTO> changeEmail(@Valid @RequestBody ChangeEmailDTO changeEmailDTO) {
+        log.info("Solicitud de cambio de email");
+        
+        try {
+            AuthResponseDTO response = authService.changeEmail(changeEmailDTO);
+            log.info("Email cambiado exitosamente");
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error cambiando email: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para actualizar información del perfil (requiere autenticación)
+     */
+    @PutMapping("/update-profile")
+    @Operation(summary = "Actualizar perfil", description = "Actualiza la información del perfil del usuario")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Perfil actualizado exitosamente"),
+            @ApiResponse(responseCode = "401", description = "No autenticado"),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos")
+    })
+    public ResponseEntity<AuthResponseDTO> updateProfile(@Valid @RequestBody UpdateUserProfileDTO updateUserProfileDTO) {
+        log.info("Solicitud de actualización de perfil");
+        
+        try {
+            AuthResponseDTO response = authService.updateUserInfo(updateUserProfileDTO);
+            log.info("Perfil actualizado exitosamente");
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error actualizando perfil: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para solicitar desbloqueo inmediato de cuenta
+     */
+    @PostMapping("/request-unlock")
+    @Operation(summary = "Solicitar desbloqueo de cuenta", description = "Solicita un código para desbloquear una cuenta bloqueada")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Código de desbloqueo enviado"),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos"),
+            @ApiResponse(responseCode = "429", description = "Demasiadas solicitudes")
+    })
+    public ResponseEntity<AuthResponseDTO> requestImmediateUnlock(@Valid @RequestBody RequestImmediateUnlockDTO requestUnlockDTO) {
+        log.info("Solicitud de desbloqueo para email: {}", requestUnlockDTO.email());
+        
+        try {
+            AuthResponseDTO response = authService.requestImmediateUnlock(requestUnlockDTO);
+            log.info("Solicitud de desbloqueo procesada para email: {}", requestUnlockDTO.email());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error en solicitud de desbloqueo para email: {}, error: {}", 
+                     requestUnlockDTO.email(), e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para verificar código de desbloqueo
+     */
+    @PostMapping("/verify-unlock-code")
+    @Operation(summary = "Verificar código de desbloqueo", description = "Verifica el código de desbloqueo y desbloquea la cuenta")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Cuenta desbloqueada exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Código inválido o expirado"),
+            @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
+    })
+    public ResponseEntity<AuthResponseDTO> verifyUnlockCode(@Valid @RequestBody VerifyUnlockCodeDTO verifyUnlockCodeDTO) {
+        log.info("Verificación de código de desbloqueo");
+        
+        try {
+            AuthResponseDTO response = authService.verifyUnlockCode(verifyUnlockCodeDTO);
+            log.info("Código de desbloqueo verificado exitosamente");
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error verificando código de desbloqueo: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para verificar el estado del servicio
+     */
+    @GetMapping("/health")
+    @Operation(summary = "Health check", description = "Verifica que el servicio de autenticación esté funcionando")
+    @ApiResponse(responseCode = "200", description = "Servicio funcionando correctamente")
+    public ResponseEntity<String> healthCheck() {
+        return ResponseEntity.ok("Auth service is running");
     }
 }

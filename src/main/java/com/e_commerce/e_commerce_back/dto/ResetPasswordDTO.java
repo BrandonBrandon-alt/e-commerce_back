@@ -9,8 +9,6 @@ import jakarta.validation.constraints.Size;
  * DTO para reset de contraseña con validaciones
  */
 public record ResetPasswordDTO(
-
-    @NotBlank(message = "El correo electrónico es requerido") @Email(message = "El correo electrónico debe ser válido") String email,
     
      @NotBlank(message = "El código de activación es requerido")
      @Pattern(regexp = "^[0-9]{6}$", message = "El código de activación debe ser de 6 dígitos")

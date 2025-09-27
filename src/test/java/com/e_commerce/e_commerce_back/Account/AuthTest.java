@@ -12,10 +12,18 @@ import org.springframework.test.context.ActiveProfiles;
 
 import com.e_commerce.e_commerce_back.dto.ActivateAccountDTO;
 import com.e_commerce.e_commerce_back.dto.AuthResponseDTO;
+import com.e_commerce.e_commerce_back.dto.ChangeEmailDTO;
+import com.e_commerce.e_commerce_back.dto.ChangePasswordDTO;
+import com.e_commerce.e_commerce_back.dto.ForgotPasswordDTO;
 import com.e_commerce.e_commerce_back.dto.LoginDTO;
 import com.e_commerce.e_commerce_back.dto.RegisterUserDTO;
+import com.e_commerce.e_commerce_back.dto.RequestImmediateUnlockDTO;
+import com.e_commerce.e_commerce_back.dto.ResendActivationCodeDTO;
+import com.e_commerce.e_commerce_back.dto.ResetPasswordDTO;
 import com.e_commerce.e_commerce_back.dto.TokenValidationDTO;
+import com.e_commerce.e_commerce_back.dto.UpdateUserProfileDTO;
 import com.e_commerce.e_commerce_back.dto.UserInfoDTO;
+import com.e_commerce.e_commerce_back.dto.VerifyUnlockCodeDTO;
 import com.e_commerce.e_commerce_back.services.implementation.AuthServiceImpl;
 import com.e_commerce.e_commerce_back.services.interfaces.EmailService;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
@@ -280,4 +288,122 @@ public class AuthTest {
             System.err.println("❌ Error en flujo completo: " + e.getMessage());
         }
     }
+
+    @Test
+    public void unlockUserAccount() {
+        try {
+            System.out.println("🔑 Test 6: Desbloqueando cuenta...");
+            
+            authService.unlockUserAccount("brandonmontealegre15@gmail.com");
+            System.out.println("✅ Cuenta desbloqueada");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error desbloqueando cuenta: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testResendActivationCode() {
+        try {
+            System.out.println("🔑 Test 7: Reenviando código de activación...");
+            
+            authService.resendActivationCode(new ResendActivationCodeDTO("brandonmontealegre15@gmail.com"));
+            System.out.println("✅ Codigo de activación reenviado");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error reenviando código de activación: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testForgotPassword() {
+        try {
+            System.out.println("🔑 Test 8: Olvidando contraseña...");
+            
+            authService.forgotPassword(new ForgotPasswordDTO("brandonmontealegre15@gmail.com"));
+            System.out.println("✅ Contraseña olvidada");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error olvidando contraseña: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testResetPassword() {
+        try {
+            System.out.println("🔑 Test 9: Resetando contraseña...");
+            
+            authService.resetPassword(new ResetPasswordDTO( "123456", "NuevaContrasenia123", "NuevaContrasenia123"));
+            System.out.println("✅ Contraseña reseteada");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error reseteando contraseña: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testChangePassword() {
+        try {
+            System.out.println("🔑 Test 10: Cambiando contraseña...");
+            
+            authService.changePassword(new ChangePasswordDTO("M@mahermosa123", "NuevaContrasenia123", "NuevaContrasenia123"));
+            System.out.println("✅ Contraseña cambiada");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error cambiando contraseña: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testChangeEmail() {
+        try {
+            System.out.println("🔑 Test 11: Cambiando correo electrónico...");
+            
+            authService.changeEmail(new ChangeEmailDTO("brandonmontealegre15@gmail.com", "brandonmontealegre15@gmail.com", "M@mahermosa123"));
+            System.out.println("✅ Correo electrónico cambiado");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error cambiando correo electrónico: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testUpdateUserInfo() {
+        try {
+            System.out.println("🔑 Test 12: Actualizando información del usuario...");
+            
+            authService.updateUserInfo(new UpdateUserProfileDTO("Brandon", "Montealegre", "3153033412"));
+            System.out.println("✅ Información del usuario actualizada");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error actualizando información del usuario: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testRequestImmediateUnlock() {
+        try {
+            System.out.println("🔑 Test 13: Solicitando desbloqueo inmediato...");
+            
+            authService.requestImmediateUnlock(new RequestImmediateUnlockDTO("brandonmontealegre15@gmail.com"));
+            System.out.println("✅ Desbloqueo inmediato solicitado");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error solicitando desbloqueo inmediato: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testVerifyUnlockCode() {
+        try {
+            System.out.println("🔑 Test 14: Verificando código de desbloqueo...");
+            
+            authService.verifyUnlockCode(new VerifyUnlockCodeDTO("123456"));
+            System.out.println("✅ Código de desbloqueo verificado");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error verificando código de desbloqueo: " + e.getMessage());
+        }
+    }
+    
 }

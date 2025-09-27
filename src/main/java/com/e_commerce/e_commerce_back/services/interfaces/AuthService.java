@@ -82,7 +82,7 @@ public interface AuthService {
      * @param activateAccountDTO Datos de activación
      * @return Respuesta de reenvío
      */
-    AuthResponseDTO resendActivationCode(String email);
+    AuthResponseDTO resendActivationCode(ResendActivationCodeDTO resendActivationCodeDTO);
 
     //-------------------GESTION DE LA CONTRASEÑA-------------------//
     /**
