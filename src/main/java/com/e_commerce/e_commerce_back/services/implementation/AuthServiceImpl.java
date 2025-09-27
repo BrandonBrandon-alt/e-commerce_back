@@ -4,6 +4,7 @@ import com.e_commerce.e_commerce_back.dto.*;
 import com.e_commerce.e_commerce_back.entity.User;
 import com.e_commerce.e_commerce_back.exception.EmailIsExists;
 import com.e_commerce.e_commerce_back.exception.IdNumberIsExists;
+import com.e_commerce.e_commerce_back.exception.PasswordsDoNotMatch;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
 import com.e_commerce.e_commerce_back.services.interfaces.AuthService;
@@ -73,8 +74,11 @@ public class AuthServiceImpl implements AuthService {
         log.info("Procesando registro para email: {}", createUserDTO.email());
 
         try {
+
+             // Normalizar email para verificaciones
+             String normalizedEmail = createUserDTO.email().toLowerCase().trim();
             // Verificar si el email ya existe
-            if (userRepository.existsByEmail(createUserDTO.email())) {
+            if (userRepository.existsByEmail(normalizedEmail)) {
                 throw new EmailIsExists("El email ya está registrado");
             }
 
@@ -83,12 +87,16 @@ public class AuthServiceImpl implements AuthService {
                 throw new IdNumberIsExists("El número de identificación ya está registrado");
             }
 
+            if (!createUserDTO.password().equals(createUserDTO.confirmPassword())) {
+                throw new PasswordsDoNotMatch("Las contraseñas no coinciden");
+            }
+
             // Usar el builder mejorado de User
             User newUser = User.builder()
                     .idNumber(createUserDTO.idNumber())
                     .name(createUserDTO.name())
                     .lastName(createUserDTO.lastName())
-                    .email(createUserDTO.email().toLowerCase().trim()) // Normalizar email
+                    .email(normalizedEmail) // Normalizar email
                     .phoneNumber(createUserDTO.phoneNumber())
                     .password(passwordEncoder.encode(createUserDTO.password()))
                     .dateOfBirth(createUserDTO.dateOfBirth()) // Si está disponible en el DTO
@@ -736,6 +744,10 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public AuthResponseDTO changeEmail(ChangeEmailDTO changeEmailDTO) {
         try {
+
+             // Normalizar email para verificaciones
+             String normalizedEmail = changeEmailDTO.newEmail().toLowerCase().trim();
+
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             if (authentication == null || !authentication.isAuthenticated()) {
                 throw new SecurityException("Usuario no autenticado");
@@ -745,7 +757,7 @@ public class AuthServiceImpl implements AuthService {
             User user = userRepository.findByEmail(username)
                     .orElseThrow(() -> new SecurityException("Usuario no encontrado"));
 
-            if (!changeEmailDTO.newEmail().equals(changeEmailDTO.newEmailConfirmation())) {
+            if (!normalizedEmail.equals(changeEmailDTO.newEmailConfirmation())) {
                 throw new IllegalArgumentException("Los correos electrónicos no coinciden");
             }
 
@@ -753,7 +765,7 @@ public class AuthServiceImpl implements AuthService {
                 throw new SecurityException("Contraseña actual incorrecta");
             }
 
-            user.setEmail(changeEmailDTO.newEmail());
+            user.setEmail(normalizedEmail);
             userRepository.save(user);
 
             log.info("Email changed successfully for user: {}", user.getEmail());

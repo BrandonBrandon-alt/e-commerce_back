@@ -57,6 +57,7 @@ public class AuthTest {
                 TEST_EMAIL,
                 "3153033412",
                 "M@mahermosa123",
+                "M@mahermosa123",
                 LocalDate.of(2000, 8, 17),
                 true
             );
@@ -249,6 +250,7 @@ public class AuthTest {
                 "Complete",
                 "brandonmontealegre15@gmail.com",
                 "3153033412",
+                "M@mahermosa123",
                 "M@mahermosa123",
                 LocalDate.of(2000, 8, 17),
                 true

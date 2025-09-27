@@ -37,7 +37,16 @@ public record RegisterUserDTO(
             message = "user.validation.password.format"
         )
         String password,
-        
+
+
+        @NotBlank(message = "user.validation.password.required")
+        @Size(min = 8, max = 100, message = "user.validation.password.size")
+        @Pattern(
+            regexp = "^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*[@#$%^&+=!]).*$", 
+            message = "user.validation.password.format"
+        )
+        String confirmPassword,
+
         // CORREGIDO: dateOfBirth es OPCIONAL y sin @NotBlank (no aplica a LocalDate)
         @Past(message = "user.validation.dateOfBirth.past")
         LocalDate dateOfBirth, // Opcional, sin @NotBlank
