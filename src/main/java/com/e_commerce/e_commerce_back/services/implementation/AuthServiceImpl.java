@@ -70,11 +70,12 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO register(RegisterUserDTO createUserDTO) {
-        log.info("Procesando registro para email: {}", createUserDTO.email());
+        String normalizedEmail = createUserDTO.email().toLowerCase().trim();
+        log.info("Procesando registro para email: {}", normalizedEmail);
 
         try {
             // Verificar si el email ya existe
-            if (userRepository.existsByEmail(createUserDTO.email())) {
+            if (userRepository.existsByEmail(normalizedEmail)) {
                 throw new EmailIsExists("El email ya está registrado");
             }
 
@@ -88,7 +89,7 @@ public class AuthServiceImpl implements AuthService {
                     .idNumber(createUserDTO.idNumber())
                     .name(createUserDTO.name())
                     .lastName(createUserDTO.lastName())
-                    .email(createUserDTO.email().toLowerCase().trim()) // Normalizar email
+                    .email(normalizedEmail) // Normalizar email
                     .phoneNumber(createUserDTO.phoneNumber())
                     .password(passwordEncoder.encode(createUserDTO.password()))
                     .dateOfBirth(createUserDTO.dateOfBirth()) // Si está disponible en el DTO
@@ -124,18 +125,26 @@ public class AuthServiceImpl implements AuthService {
             log.warn("Error de registro - {}: {}", e.getClass().getSimpleName(), e.getMessage());
             throw e;
         } catch (Exception e) {
-            log.error("Error en registro para email: {}, error: {}", createUserDTO.email(), e.getMessage());
+            log.error("Error en registro para email: {}, error: {}", normalizedEmail, e.getMessage());
             throw new RuntimeException("Error interno del servidor durante el registro");
         }
     }
 
     @Override
     public AuthResponseDTO activateAccount(ActivateAccountDTO activateAccountDTO) {
-        log.info("Procesando activación de cuenta para email: {}", activateAccountDTO.email());
+        log.info("Procesando activación de cuenta con código");
 
         try {
-            // Buscar usuario por email
-            User user = userRepository.findByEmail(activateAccountDTO.email())
+            // Verificar y consumir el código de activación, obteniendo el userId
+            Long userId = tokenRedisService.verifyAndConsumeActivationCode(activateAccountDTO.activationCode());
+            
+            if (userId == null) {
+                log.warn("Código de activación inválido o expirado");
+                return AuthResponseDTO.error("Código de activación incorrecto o expirado");
+            }
+
+            // Buscar usuario por ID
+            User user = userRepository.findById(userId)
                     .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 
             // Verificar si la cuenta ya está activada
@@ -143,20 +152,14 @@ public class AuthServiceImpl implements AuthService {
                 return AuthResponseDTO.error("La cuenta ya está activada");
             }
 
-            // ✅ Verificar código de activación desde Redis
-            if (!tokenRedisService.verifyActivationCode(user.getId(), activateAccountDTO.activationCode())) {
-                log.warn("Código de activación inválido o expirado para usuario: {}", activateAccountDTO.email());
-                return AuthResponseDTO.error("Código de activación incorrecto o expirado");
-            }
-
             // Activar la cuenta
-            user.setStatus(EnumStatus.ACTIVE); // ✅ Cambiar status también
-            user.setEmailVerified(true); // ✅ Marcar email como verificado
+            user.setStatus(EnumStatus.ACTIVE);
+            user.setEmailVerified(true);
 
             // Guardar cambios
             userRepository.save(user);
 
-            log.info("Cuenta activada exitosamente para usuario: {}", activateAccountDTO.email());
+            log.info("Cuenta activada exitosamente para usuario ID: {} - Email: {}", userId, user.getEmail());
 
             // Enviar email de bienvenida
             try {
@@ -169,10 +172,10 @@ public class AuthServiceImpl implements AuthService {
             return AuthResponseDTO.success("¡Cuenta activada exitosamente! Ya puedes iniciar sesión.");
 
         } catch (UsernameNotFoundException e) {
-            log.warn("Intento de activación con email no registrado: {}", activateAccountDTO.email());
+            log.error("Usuario no encontrado al activar cuenta: {}", e.getMessage());
             return AuthResponseDTO.error("Usuario no encontrado");
         } catch (Exception e) {
-            log.error("Error en activación para email: {}, error: {}", activateAccountDTO.email(), e.getMessage());
+            log.error("Error en activación de cuenta: {}", e.getMessage());
             return AuthResponseDTO.error("Error interno del servidor");
         }
     }
@@ -184,11 +187,12 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO login(LoginDTO loginDTO) {
-        log.info("Procesando login para email: {}", loginDTO.email());
+        String normalizedEmail = loginDTO.email().toLowerCase().trim();
+        log.info("Procesando login para email: {}", normalizedEmail);
 
         try {
             // Buscar usuario primero para verificar bloqueos
-            User user = userRepository.findByEmail(loginDTO.email())
+            User user = userRepository.findByEmail(normalizedEmail)
                     .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 
             // Verificar si la cuenta está temporalmente bloqueada
@@ -206,7 +210,7 @@ public class AuthServiceImpl implements AuthService {
                 // Autenticar usuario
                 Authentication authentication = authenticationManager.authenticate(
                         new UsernamePasswordAuthenticationToken(
-                                loginDTO.email(),
+                                normalizedEmail,
                                 loginDTO.password()));
 
                 // Login exitoso - resetear intentos fallidos
@@ -262,12 +266,12 @@ public class AuthServiceImpl implements AuthService {
             }
 
         } catch (UsernameNotFoundException e) {
-            log.warn("Intento de login con email no registrado: {}", loginDTO.email());
+            log.warn("Intento de login con email no registrado: {}", normalizedEmail);
             throw new BadCredentialsException("Email o contraseña incorrectos");
         } catch (BadCredentialsException e) {
             throw e; // Re-lanzar excepciones de credenciales
         } catch (Exception e) {
-            log.error("Error en login para email: {}, error: {}", loginDTO.email(), e.getMessage());
+            log.error("Error en login para email: {}, error: {}", normalizedEmail, e.getMessage());
             throw new RuntimeException("Error interno del servidor");
         }
     }
@@ -472,13 +476,14 @@ public class AuthServiceImpl implements AuthService {
 
     @Transactional
     public void unlockUserAccount(String email) {
-        User user = userRepository.findByEmail(email)
+        String normalizedEmail = email.toLowerCase().trim();
+        User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 
         user.resetFailedLoginAttempts();
         userRepository.save(user);
 
-        log.info("Cuenta desbloqueada manualmente para usuario: {}", email);
+        log.info("Cuenta desbloqueada manualmente para usuario: {}", normalizedEmail);
     }
 
     /**
@@ -487,11 +492,12 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO resendActivationCode(String email) {
-        log.info("Procesando reenvío de código de activación para email: {}", email);
+        String normalizedEmail = email.toLowerCase().trim();
+        log.info("Procesando reenvío de código de activación para email: {}", normalizedEmail);
 
         try {
             // Buscar usuario por email
-            User user = userRepository.findByEmail(email)
+            User user = userRepository.findByEmail(normalizedEmail)
                     .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 
             // Verificar si la cuenta ya está activada
@@ -521,10 +527,10 @@ public class AuthServiceImpl implements AuthService {
                     "Nuevo código de activación enviado. Revisa tu email.");
 
         } catch (UsernameNotFoundException e) {
-            log.warn("Intento de reenvío con email no registrado: {}", email);
+            log.warn("Intento de reenvío con email no registrado: {}", normalizedEmail);
             return AuthResponseDTO.error("Usuario no encontrado");
         } catch (Exception e) {
-            log.error("Error en reenvío para email: {}, error: {}", email, e.getMessage());
+            log.error("Error en reenvío para email: {}, error: {}", normalizedEmail, e.getMessage());
             return AuthResponseDTO.error("Error interno del servidor");
         }
     }
@@ -535,10 +541,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO forgotPassword(ForgotPasswordDTO forgotPasswordDTO) {
+        String normalizedEmail = forgotPasswordDTO.email().toLowerCase().trim();
         try {
-            User user = userRepository.findByEmail(forgotPasswordDTO.email())
+            User user = userRepository.findByEmail(normalizedEmail)
                     .orElseThrow(() -> new UsernameNotFoundException(
-                            "Usuario no encontrado con el email: " + forgotPasswordDTO.email()));
+                            "Usuario no encontrado con el email: " + normalizedEmail));
 
             // ✅ AGREGAR RATE LIMITING:
             if (!tokenRedisService.canRequestToken(user.getId(), "reset")) {
@@ -549,15 +556,15 @@ public class AuthServiceImpl implements AuthService {
 
             emailService.sendPasswordResetEmail(user, resetCode);
 
-            log.info("Código de reseteo de contraseña enviado a: {}", forgotPasswordDTO.email());
+            log.info("Código de reseteo de contraseña enviado a: {}", normalizedEmail);
             return AuthResponseDTO.success("Se ha enviado un código de reseteo a tu correo electrónico.");
 
         } catch (UsernameNotFoundException e) {
-            log.warn("Intento de reseteo de contraseña para email no registrado: {}", forgotPasswordDTO.email());
+            log.warn("Intento de reseteo de contraseña para email no registrado: {}", normalizedEmail);
             // Por seguridad, no revelamos si el email existe o no.
             return AuthResponseDTO.success("Si tu correo está registrado, recibirás un código de reseteo.");
         } catch (Exception e) {
-            log.error("Error al procesar la solicitud de olvido de contraseña para {}: {}", forgotPasswordDTO.email(),
+            log.error("Error al procesar la solicitud de olvido de contraseña para {}: {}", normalizedEmail,
                     e.getMessage());
             return AuthResponseDTO.error("Error interno del servidor al intentar resetear la contraseña.");
         }
@@ -565,32 +572,41 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * Implementación del servicio de reseteo de contraseña
+     * Usa el código de Redis para obtener el userId directamente
      */
 
     @Override
     public AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO) {
         try {
-            User user = userRepository.findByEmail(resetPasswordDTO.email())
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-
-            if (!tokenRedisService.verifyResetCode(user.getId(), resetPasswordDTO.resetCode())) {
-                log.warn("Código de reset inválido o expirado para usuario: {}", resetPasswordDTO.email());
+            // Verificar y consumir el código de reset, obteniendo el userId
+            Long userId = tokenRedisService.verifyAndConsumeResetCode(resetPasswordDTO.resetCode());
+            
+            if (userId == null) {
+                log.warn("Código de reset inválido o expirado: {}", resetPasswordDTO.resetCode());
                 return AuthResponseDTO.error("Código de reset incorrecto o expirado");
             }
 
+            // Buscar usuario por ID
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+
+            // Validar que las contraseñas coincidan
             if (!resetPasswordDTO.passwordsMatch()) {
                 return AuthResponseDTO.error("Las contraseñas no coinciden");
             }
 
+            // Actualizar contraseña
             user.setPassword(passwordEncoder.encode(resetPasswordDTO.password()));
-
             userRepository.save(user);
 
+            log.info("Contraseña restablecida exitosamente para usuario ID: {}", userId);
             return AuthResponseDTO.success("Contraseña restablecida exitosamente");
 
+        } catch (UsernameNotFoundException e) {
+            log.error("Usuario no encontrado al resetear contraseña: {}", e.getMessage());
+            return AuthResponseDTO.error("Error al procesar la solicitud");
         } catch (Exception e) {
-            log.error("Error al restablecer contraseña para email: {}, error: {}",
-                    resetPasswordDTO.email(), e.getMessage());
+            log.error("Error al restablecer contraseña: {}", e.getMessage());
             return AuthResponseDTO.error("Error interno del servidor");
         }
 
@@ -734,7 +750,10 @@ public class AuthServiceImpl implements AuthService {
             User user = userRepository.findByEmail(username)
                     .orElseThrow(() -> new SecurityException("Usuario no encontrado"));
 
-            if (!changeEmailDTO.newEmail().equals(changeEmailDTO.newEmailConfirmation())) {
+            String newEmailNormalized = changeEmailDTO.newEmail().toLowerCase().trim();
+            String newEmailConfirmationNormalized = changeEmailDTO.newEmailConfirmation().toLowerCase().trim();
+
+            if (!newEmailNormalized.equals(newEmailConfirmationNormalized)) {
                 throw new IllegalArgumentException("Los correos electrónicos no coinciden");
             }
 
@@ -742,7 +761,7 @@ public class AuthServiceImpl implements AuthService {
                 throw new SecurityException("Contraseña actual incorrecta");
             }
 
-            user.setEmail(changeEmailDTO.newEmail());
+            user.setEmail(newEmailNormalized);
             userRepository.save(user);
 
             log.info("Email changed successfully for user: {}", user.getEmail());
@@ -787,8 +806,9 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO requestImmediateUnlock(RequestImmediateUnlockDTO requestImmediateUnlockDTO) {
+        String normalizedEmail = requestImmediateUnlockDTO.email().toLowerCase().trim();
         try {
-            User user = userRepository.findByEmail(requestImmediateUnlockDTO.email()).orElse(null);
+            User user = userRepository.findByEmail(normalizedEmail).orElse(null);
 
             if (user == null) {
                 return AuthResponseDTO.success("Si el correo es válido y está bloqueado, recibirás un código");
@@ -822,8 +842,17 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public AuthResponseDTO verifyUnlockCode(VerifyUnlockCodeDTO verifyUnlockCodeDTO) {
         try {
-            User user = userRepository.findByEmail(verifyUnlockCodeDTO.email())
-                    .orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado"));
+            // Verificar y consumir el código de desbloqueo, obteniendo el userId
+            Long userId = tokenRedisService.getUserIdByUnlockCode(verifyUnlockCodeDTO.code());
+            
+            if (userId == null) {
+                log.warn("Código de desbloqueo inválido o expirado: {}", verifyUnlockCodeDTO.code());
+                return AuthResponseDTO.error("Código de desbloqueo incorrecto o expirado");
+            }
+
+            // Buscar usuario por ID
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 
             // Verificar código desde Redis
             if (!tokenRedisService.verifyUnlockCode(user.getId(), verifyUnlockCodeDTO.code())) {

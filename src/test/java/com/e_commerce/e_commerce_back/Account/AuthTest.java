@@ -77,7 +77,6 @@ public class AuthTest {
             String activationCode = "902195"; // <- Actualiza este valor
             
             ActivateAccountDTO activateAccountDTO = new ActivateAccountDTO(
-                TEST_EMAIL,
                 activationCode
             );
             
@@ -252,7 +251,6 @@ public class AuthTest {
 
             System.out.println("🔐 Paso 2: Activación (usa código real)...");
             ActivateAccountDTO activateDTO = new ActivateAccountDTO(
-                "brandonmontealegre15@gmail.com",
                 "123456" // <- Código del email
             );
             

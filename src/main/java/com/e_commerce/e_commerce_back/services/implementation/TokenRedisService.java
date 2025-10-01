@@ -81,6 +81,61 @@ public class TokenRedisService {
         return true;
     }
 
+    /**
+     * Obtiene el userId asociado a un código de activación sin consumirlo
+     * Útil para validar el código antes de procesar la activación
+     */
+    public Long getUserIdByActivationCode(String activationCode) {
+        // Buscar en todas las keys de activation_code
+        String pattern = "activation_code:*";
+        var keys = redisTemplate.keys(pattern);
+        
+        if (keys == null || keys.isEmpty()) {
+            log.warn("No activation codes found in Redis");
+            return null;
+        }
+
+        for (String key : keys) {
+            String storedCode = redisTemplate.opsForValue().get(key);
+            if (storedCode != null && storedCode.equals(activationCode.trim())) {
+                // Extraer userId del key "activation_code:123"
+                String userIdStr = key.substring("activation_code:".length());
+                try {
+                    Long userId = Long.parseLong(userIdStr);
+                    log.info("Found userId {} for activation code", userId);
+                    return userId;
+                } catch (NumberFormatException e) {
+                    log.error("Invalid userId format in key: {}", key);
+                }
+            }
+        }
+        
+        log.warn("No matching activation code found");
+        return null;
+    }
+
+    /**
+     * Verifica y consume código de activación usando solo el código
+     * Retorna el userId si es válido, null si no
+     */
+    public Long verifyAndConsumeActivationCode(String activationCode) {
+        Long userId = getUserIdByActivationCode(activationCode);
+        if (userId == null) {
+            return null;
+        }
+
+        // Consumir el código
+        String key = "activation_code:" + userId;
+        Boolean deleted = redisTemplate.delete(key);
+        
+        if (Boolean.TRUE.equals(deleted)) {
+            log.info("Activation code verified and consumed for user: {}", userId);
+            return userId;
+        }
+        
+        return null;
+    }
+
     // ================= RESET PASSWORD CODE =================
 
     /**
@@ -117,6 +172,95 @@ public class TokenRedisService {
         redisTemplate.delete(key);
         log.info("Reset code verified and consumed for user: {}", userId);
         return true;
+    }
+
+    /**
+     * Obtiene el userId asociado a un código de reset sin consumirlo
+     * Útil para validar el código antes de procesar el reseteo
+     */
+    public Long getUserIdByResetCode(String code) {
+        // Buscar en todas las keys de reset_code
+        String pattern = "reset_code:*";
+        var keys = redisTemplate.keys(pattern);
+        
+        if (keys == null || keys.isEmpty()) {
+            log.warn("No reset codes found in Redis");
+            return null;
+        }
+
+        for (String key : keys) {
+            String storedCode = redisTemplate.opsForValue().get(key);
+            if (storedCode != null && storedCode.equals(code.trim())) {
+                // Extraer userId del key "reset_code:123"
+                String userIdStr = key.substring("reset_code:".length());
+                try {
+                    Long userId = Long.parseLong(userIdStr);
+                    log.info("Found userId {} for reset code", userId);
+                    return userId;
+                } catch (NumberFormatException e) {
+                    log.error("Invalid userId format in key: {}", key);
+                }
+            }
+        }
+        
+        log.warn("No matching reset code found");
+        return null;
+    }
+
+
+      /**
+     * Obtiene el userId asociado a un código de desbloqueo sin consumirlo
+     * Útil para validar el código antes de procesar el desbloqueo
+     */
+    public Long getUserIdByUnlockCode(String unlockCode) {
+        // Buscar en todas las keys de unlock_code
+        String pattern = "unlock_code:*";
+        var keys = redisTemplate.keys(pattern);
+        
+        if (keys == null || keys.isEmpty()) {
+            log.warn("No unlock codes found in Redis");
+            return null;
+        }
+
+        for (String key : keys) {
+            String storedCode = redisTemplate.opsForValue().get(key);
+            if (storedCode != null && storedCode.equals(unlockCode.trim())) {
+                // Extraer userId del key "unlock_code:123"
+                String userIdStr = key.substring("unlock_code:".length());
+                try {
+                    Long userId = Long.parseLong(userIdStr);
+                    log.info("Found userId {} for unlock code", userId);
+                    return userId;
+                } catch (NumberFormatException e) {
+                    log.error("Invalid userId format in key: {}", key);
+                }
+            }
+        }
+        
+        log.warn("No matching unlock code found");
+        return null;
+    }
+
+    /**
+     * Verifica y consume código de reset usando solo el código
+     * Retorna el userId si es válido, null si no
+     */
+    public Long verifyAndConsumeResetCode(String code) {
+        Long userId = getUserIdByResetCode(code);
+        if (userId == null) {
+            return null;
+        }
+
+        // Consumir el código
+        String key = "reset_code:" + userId;
+        Boolean deleted = redisTemplate.delete(key);
+        
+        if (Boolean.TRUE.equals(deleted)) {
+            log.info("Reset code verified and consumed for user: {}", userId);
+            return userId;
+        }
+        
+        return null;
     }
 
     // ================= UNLOCK CODE (NUEVO) =================
