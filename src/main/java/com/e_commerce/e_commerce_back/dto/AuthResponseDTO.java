@@ -112,4 +112,16 @@ public class AuthResponseDTO {
                 .timestamp(LocalDateTime.now())
                 .build();
     }
+
+
+    /**
+ * Constructor para respuesta exitosa con información de usuario
+ */
+public static AuthResponseDTO successWithUserInfo(String message, UserInfoDTO userInfo) {
+    return AuthResponseDTO.builder()
+            .message(message)
+            .userInfo(userInfo)
+            .timestamp(LocalDateTime.now())
+            .build();
+}
 }

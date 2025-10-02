@@ -230,4 +230,264 @@ public class EmailServiceImpl implements EmailService {
             throw new RuntimeException("Error enviando email de código de desbloqueo", e);
         }
     }
+
+    @Override
+    public void sendEmailChangeVerification(User user, String verificationCode) {
+        log.info("Enviando código de verificación de cambio de email a: {}", user.getEmail());
+
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromAddress);
+            helper.setTo(user.getEmail()); // El NUEVO email
+            helper.setSubject("Verifica tu nuevo correo electrónico - " + fromName);
+
+            String htmlContent = buildEmailChangeVerificationTemplate(user, verificationCode);
+            helper.setText(htmlContent, true);
+
+            mailSender.send(message);
+            log.info("Email de verificación de cambio enviado exitosamente a: {}", user.getEmail());
+
+        } catch (MessagingException e) {
+            log.error("Error enviando email de verificación de cambio: {}", e.getMessage());
+            throw new RuntimeException("Error enviando email de verificación", e);
+        }
+    }
+
+    @Override
+    public void sendEmailChangedNotification(String oldEmail, String newEmail) {
+        log.info("Enviando notificación de cambio de email a: {}", oldEmail);
+
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromAddress);
+            helper.setTo(oldEmail); // El email ANTERIOR
+            helper.setSubject("Tu correo electrónico ha sido cambiado - " + fromName);
+
+            String htmlContent = buildEmailChangedNotificationTemplate(oldEmail, newEmail);
+            helper.setText(htmlContent, true);
+
+            mailSender.send(message);
+            log.info("Notificación de cambio de email enviada a: {}", oldEmail);
+
+        } catch (MessagingException e) {
+            log.error("Error enviando notificación de cambio de email: {}", e.getMessage());
+            // No lanzar excepción porque es solo una notificación
+        }
+    }
+
+    @Override
+    public void sendPasswordChangedConfirmationEmail(User user) {
+        log.info("Enviando confirmación de cambio de contraseña a: {}", user.getEmail());
+
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromAddress);
+            helper.setTo(user.getEmail());
+            helper.setSubject("Contraseña cambiada exitosamente - " + fromName);
+
+            String htmlContent = buildPasswordChangedTemplate(user);
+            helper.setText(htmlContent, true);
+
+            mailSender.send(message);
+            log.info("Email de confirmación de cambio de contraseña enviado a: {}", user.getEmail());
+
+        } catch (MessagingException e) {
+            log.error("Error enviando confirmación de cambio de contraseña: {}", e.getMessage());
+        }
+    }
+
+    @Override
+    public void sendAccountUnlockedEmail(User user) {
+        log.info("Enviando confirmación de desbloqueo a: {}", user.getEmail());
+
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromAddress);
+            helper.setTo(user.getEmail());
+            helper.setSubject("Cuenta desbloqueada - " + fromName);
+
+            String htmlContent = buildAccountUnlockedTemplate(user);
+            helper.setText(htmlContent, true);
+
+            mailSender.send(message);
+            log.info("Email de confirmación de desbloqueo enviado a: {}", user.getEmail());
+
+        } catch (MessagingException e) {
+            log.error("Error enviando confirmación de desbloqueo: {}", e.getMessage());
+        }
+    }
+
+    private String buildEmailChangeVerificationTemplate(User user, String verificationCode) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
+                        .content { background: #f9f9f9; padding: 30px; }
+                        .code-box { background: #fff; border: 2px solid #4CAF50; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; margin: 20px 0; letter-spacing: 5px; }
+                        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+                        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>Verifica tu nuevo correo electrónico</h1>
+                        </div>
+                        <div class="content">
+                            <p>Hola <strong>%s</strong>,</p>
+                            <p>Has cambiado tu correo electrónico. Para completar el cambio, verifica tu nuevo correo ingresando el siguiente código:</p>
+                            <div class="code-box">%s</div>
+                            <p>Este código expirará en <strong>15 minutos</strong>.</p>
+                            <div class="warning">
+                                <strong>⚠️ Atención:</strong> Si no solicitaste este cambio, ignora este correo y tu email anterior seguirá activo.
+                            </div>
+                        </div>
+                        <div class="footer">
+                            <p>Este es un correo automático, por favor no respondas.</p>
+                            <p>&copy; %s - Todos los derechos reservados</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """
+                .formatted(user.getFullName(), verificationCode, fromName);
+    }
+
+    private String buildEmailChangedNotificationTemplate(String oldEmail, String newEmail) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: #ff9800; color: white; padding: 20px; text-align: center; }
+                        .content { background: #f9f9f9; padding: 30px; }
+                        .alert { background: #f44336; color: white; padding: 15px; margin: 20px 0; border-radius: 5px; }
+                        .info { background: #e3f2fd; border-left: 4px solid #2196F3; padding: 15px; margin: 20px 0; }
+                        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>⚠️ Cambio de correo electrónico</h1>
+                        </div>
+                        <div class="content">
+                            <p>Hola,</p>
+                            <p>Te informamos que el correo electrónico asociado a tu cuenta ha sido cambiado.</p>
+                            <div class="info">
+                                <p><strong>Email anterior:</strong> %s</p>
+                                <p><strong>Nuevo email:</strong> %s</p>
+                                <p><strong>Fecha:</strong> %s</p>
+                            </div>
+                            <div class="alert">
+                                <strong>🚨 ¿No fuiste tú?</strong><br>
+                                Si NO autorizaste este cambio, tu cuenta puede estar comprometida.
+                                Contacta inmediatamente a soporte.
+                            </div>
+                            <p>A partir de ahora, todas las comunicaciones se enviarán al nuevo correo.</p>
+                        </div>
+                        <div class="footer">
+                            <p>Este es un correo automático, por favor no respondas.</p>
+                            <p>&copy; %s - Todos los derechos reservados</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """.formatted(oldEmail, newEmail,
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")), fromName);
+    }
+
+    private String buildPasswordChangedTemplate(User user) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
+                        .content { background: #f9f9f9; padding: 30px; }
+                        .alert { background: #f44336; color: white; padding: 15px; margin: 20px 0; border-radius: 5px; }
+                        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>✓ Contraseña cambiada</h1>
+                        </div>
+                        <div class="content">
+                            <p>Hola <strong>%s</strong>,</p>
+                            <p>Tu contraseña ha sido cambiada exitosamente.</p>
+                            <p><strong>Fecha del cambio:</strong> %s</p>
+                            <div class="alert">
+                                <strong>🚨 ¿No fuiste tú?</strong><br>
+                                Si NO cambiaste tu contraseña, tu cuenta puede estar comprometida.
+                                Restablece tu contraseña inmediatamente.
+                            </div>
+                        </div>
+                        <div class="footer">
+                            <p>Este es un correo automático, por favor no respondas.</p>
+                            <p>&copy; %s - Todos los derechos reservados</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """.formatted(user.getFullName(),
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")), fromName);
+    }
+
+    private String buildAccountUnlockedTemplate(User user) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
+                        .content { background: #f9f9f9; padding: 30px; }
+                        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>✓ Cuenta desbloqueada</h1>
+                        </div>
+                        <div class="content">
+                            <p>Hola <strong>%s</strong>,</p>
+                            <p>Tu cuenta ha sido desbloqueada exitosamente.</p>
+                            <p>Ya puedes iniciar sesión normalmente.</p>
+                            <p><strong>Fecha de desbloqueo:</strong> %s</p>
+                        </div>
+                        <div class="footer">
+                            <p>Este es un correo automático, por favor no respondas.</p>
+                            <p>&copy; %s - Todos los derechos reservados</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """.formatted(user.getFullName(),
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")), fromName);
+    }
+
 }

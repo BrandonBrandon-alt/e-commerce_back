@@ -52,5 +52,26 @@ public interface EmailService {
     void sendUnlockCode(User user, String unlockCode);
 
 
+    /**
+     * Envía código de verificación al nuevo email después de cambio
+     */
+    void sendEmailChangeVerification(User user, String verificationCode);
+    
+    /**
+     * Notifica al email anterior que se cambió el email
+     */
+    void sendEmailChangedNotification(String oldEmail, String newEmail);
+    
+    /**
+     * Notifica confirmación de cambio de contraseña
+     */
+    void sendPasswordChangedConfirmationEmail(User user);
+    
+    /**
+     * Notifica que la cuenta fue desbloqueada
+     */
+    void sendAccountUnlockedEmail(User user);
+
+
     
 }

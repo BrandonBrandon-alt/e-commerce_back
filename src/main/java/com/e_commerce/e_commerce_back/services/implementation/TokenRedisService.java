@@ -8,15 +8,14 @@ import org.springframework.stereotype.Service;
 
 import com.e_commerce.e_commerce_back.security.JwtUtil;
 
-import java.sql.Date;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Servicio para manejo de tokens temporales en Redis
- * Reemplaza las columnas de códigos en la base de datos
+ * Servicio mejorado para manejo de tokens temporales en Redis
+ * Implementa operaciones atómicas, rate limiting, y gestión completa de tokens
  */
 @Service
 @RequiredArgsConstructor
@@ -24,10 +23,9 @@ import java.util.concurrent.TimeUnit;
 public class TokenRedisService {
 
     private final RedisTemplate<String, String> redisTemplate;
-
     private final JwtUtil jwtUtil;
 
-    // Usar las mismas configuraciones que ya tienes en AuthServiceImpl
+    // Configuraciones desde application.properties
     @Value("${app.email.activation-code-expiry-minutes:15}")
     private Integer activationCodeExpiryMinutes;
 
@@ -37,395 +35,405 @@ public class TokenRedisService {
     @Value("${app.security.unlock-code-expiry-minutes:15}")
     private Integer unlockCodeExpiryMinutes;
 
-    @Value("${app.security.refresh-token-expiry-minutes:15}")
-    private Integer refreshTokenExpiryMinutes;
+    @Value("${app.security.refresh-token-expiry-days:7}")
+    private Integer refreshTokenExpiryDays;
 
-    // Rate limiting - máximo 3 solicitudes por hora por tipo
+    @Value("${app.security.email-verification-expiry-hours:24}")
+    private Integer emailVerificationExpiryHours;
+
+    // Rate limiting
     private static final int MAX_REQUESTS_PER_HOUR = 3;
+    private static final int CODE_LENGTH = 6;
 
-    // ================= ACTIVATION CODE =================
+    // Prefijos de keys para Redis
+    private static final String ACTIVATION_PREFIX = "activation_code:";
+    private static final String RESET_PREFIX = "reset_code:";
+    private static final String UNLOCK_PREFIX = "unlock_code:";
+    private static final String VERIFICATION_PREFIX = "verification_token:";
+    private static final String REFRESH_PREFIX = "refresh_token:";
+    private static final String BLACKLIST_PREFIX = "blacklist_token:";
+    private static final String RATE_LIMIT_SUFFIX = "_rate_limit:";
+
+    // ================= ACTIVATION CODE (MEJORADO) =================
 
     /**
      * Genera y almacena código de activación en Redis
-     * Reemplaza: user.setCodeActivation() y user.setCodeActivationExpiry()
      */
     public String generateAndStoreActivationCode(Long userId) {
-        String code = generateSixDigitCode();
-        String key = "activation_code:" + userId;
+        String code = generateSecureCode(CODE_LENGTH);
+        String key = ACTIVATION_PREFIX + userId;
 
         redisTemplate.opsForValue().set(
                 key,
                 code,
                 Duration.ofMinutes(activationCodeExpiryMinutes));
 
-        log.info("Activation code generated and stored in Redis for user: {}", userId);
+        log.info("Código de activación generado y almacenado para usuario: {} (TTL: {} minutos)", 
+                userId, activationCodeExpiryMinutes);
         return code;
     }
 
     /**
-     * Verifica código de activación desde Redis
-     * Reemplaza: user.getCodeActivation().equals() y user.isActivationCodeExpired()
+     * Verifica código de activación (sin consumir)
+     * Útil para validaciones previas
      */
-    public boolean verifyActivationCode(Long userId, String code) {
-        String key = "activation_code:" + userId;
+    public boolean isActivationCodeValid(Long userId, String code) {
+        String key = ACTIVATION_PREFIX + userId;
         String storedCode = redisTemplate.opsForValue().get(key);
-
-        if (storedCode == null || !storedCode.equals(code.trim())) {
-            log.warn("Invalid activation code attempt for user: {}", userId);
-            return false;
-        }
-
-        // Código válido - eliminarlo para que sea de un solo uso
-        redisTemplate.delete(key);
-        log.info("Activation code verified and consumed for user: {}", userId);
-        return true;
+        return storedCode != null && storedCode.equals(code.trim());
     }
 
     /**
-     * Obtiene el userId asociado a un código de activación sin consumirlo
-     * Útil para validar el código antes de procesar la activación
+     * Obtiene el userId asociado a un código de activación (sin consumir)
      */
     public Long getUserIdByActivationCode(String activationCode) {
-        // Buscar en todas las keys de activation_code
-        String pattern = "activation_code:*";
-        var keys = redisTemplate.keys(pattern);
-        
-        if (keys == null || keys.isEmpty()) {
-            log.warn("No activation codes found in Redis");
-            return null;
-        }
-
-        for (String key : keys) {
-            String storedCode = redisTemplate.opsForValue().get(key);
-            if (storedCode != null && storedCode.equals(activationCode.trim())) {
-                // Extraer userId del key "activation_code:123"
-                String userIdStr = key.substring("activation_code:".length());
-                try {
-                    Long userId = Long.parseLong(userIdStr);
-                    log.info("Found userId {} for activation code", userId);
-                    return userId;
-                } catch (NumberFormatException e) {
-                    log.error("Invalid userId format in key: {}", key);
-                }
-            }
-        }
-        
-        log.warn("No matching activation code found");
-        return null;
+        return findUserIdByCode(ACTIVATION_PREFIX + "*", activationCode, "activation");
     }
 
     /**
      * Verifica y consume código de activación usando solo el código
-     * Retorna el userId si es válido, null si no
+     * VERSIÓN ATÓMICA - Evita condiciones de carrera
      */
     public Long verifyAndConsumeActivationCode(String activationCode) {
-        Long userId = getUserIdByActivationCode(activationCode);
-        if (userId == null) {
+        log.info("Verificando y consumiendo código de activación");
+        
+        try {
+            String pattern = ACTIVATION_PREFIX + "*";
+            Set<String> keys = redisTemplate.keys(pattern);
+            
+            if (keys == null || keys.isEmpty()) {
+                log.warn("No hay códigos de activación en Redis");
+                return null;
+            }
+
+            for (String key : keys) {
+                // Operación atómica: obtener y eliminar en un solo paso
+                String storedCode = redisTemplate.opsForValue().getAndDelete(key);
+                
+                if (storedCode != null && storedCode.equals(activationCode.trim())) {
+                    Long userId = extractUserIdFromKey(key, ACTIVATION_PREFIX);
+                    if (userId != null) {
+                        log.info("Código de activación verificado y consumido atómicamente para userId: {}", userId);
+                        return userId;
+                    }
+                }
+            }
+            
+            log.warn("Código de activación no encontrado o inválido");
+            return null;
+            
+        } catch (Exception e) {
+            log.error("Error al verificar código de activación: {}", e.getMessage(), e);
             return null;
         }
-
-        // Consumir el código
-        String key = "activation_code:" + userId;
-        Boolean deleted = redisTemplate.delete(key);
-        
-        if (Boolean.TRUE.equals(deleted)) {
-            log.info("Activation code verified and consumed for user: {}", userId);
-            return userId;
-        }
-        
-        return null;
     }
 
-    // ================= RESET PASSWORD CODE =================
+    /**
+     * Reenvía código de activación con rate limiting
+     */
+    public String resendActivationCodeWithRateLimit(Long userId) {
+        if (!canRequestToken(userId, "activation")) {
+            Duration remaining = getRateLimitTimeRemaining(userId, "activation");
+            throw new RuntimeException(String.format(
+                "Demasiados intentos. Intente nuevamente en %d minutos", 
+                remaining.toMinutes()));
+        }
+
+        invalidateActivationCode(userId);
+        return generateAndStoreActivationCode(userId);
+    }
+
+    // ================= RESET PASSWORD CODE (MEJORADO) =================
 
     /**
-     * Genera y almacena código de reset password en Redis
-     * Reemplaza: user.setCodeResetPassword() y user.setCodeResetPasswordExpiry()
+     * Genera y almacena código de reset password
      */
     public String generateAndStoreResetCode(Long userId) {
-        String code = generateSixDigitCode();
-        String key = "reset_code:" + userId;
+        String code = generateSecureCode(CODE_LENGTH);
+        String key = RESET_PREFIX + userId;
 
         redisTemplate.opsForValue().set(
                 key,
                 code,
                 Duration.ofMinutes(resetPasswordCodeExpiryMinutes));
 
-        log.info("Reset password code generated and stored in Redis for user: {}", userId);
+        log.info("Código de reset generado para usuario: {} (TTL: {} minutos)", 
+                userId, resetPasswordCodeExpiryMinutes);
         return code;
     }
 
     /**
-     * Verifica código de reset password desde Redis
-     * Reemplaza: user.getCodeResetPassword().equals() y verificación de expiración
+     * Verifica código de reset (sin consumir)
      */
-    public boolean verifyResetCode(Long userId, String code) {
-        String key = "reset_code:" + userId;
+    public boolean isResetCodeValid(Long userId, String code) {
+        String key = RESET_PREFIX + userId;
         String storedCode = redisTemplate.opsForValue().get(key);
-
-        if (storedCode == null || !storedCode.equals(code.trim())) {
-            log.warn("Invalid reset code attempt for user: {}", userId);
-            return false;
-        }
-
-        // Código válido - eliminarlo para que sea de un solo uso
-        redisTemplate.delete(key);
-        log.info("Reset code verified and consumed for user: {}", userId);
-        return true;
+        return storedCode != null && storedCode.equals(code.trim());
     }
 
     /**
-     * Obtiene el userId asociado a un código de reset sin consumirlo
-     * Útil para validar el código antes de procesar el reseteo
+     * Obtiene userId por código de reset
      */
-    public Long getUserIdByResetCode(String code) {
-        // Buscar en todas las keys de reset_code
-        String pattern = "reset_code:*";
-        var keys = redisTemplate.keys(pattern);
-        
-        if (keys == null || keys.isEmpty()) {
-            log.warn("No reset codes found in Redis");
-            return null;
-        }
+    public Long getUserIdByResetCode(String resetCode) {
+        return findUserIdByCode(RESET_PREFIX + "*", resetCode, "reset");
+    }
 
-        for (String key : keys) {
-            String storedCode = redisTemplate.opsForValue().get(key);
-            if (storedCode != null && storedCode.equals(code.trim())) {
-                // Extraer userId del key "reset_code:123"
-                String userIdStr = key.substring("reset_code:".length());
-                try {
-                    Long userId = Long.parseLong(userIdStr);
-                    log.info("Found userId {} for reset code", userId);
-                    return userId;
-                } catch (NumberFormatException e) {
-                    log.error("Invalid userId format in key: {}", key);
+    /**
+     * Verifica y consume código de reset - VERSIÓN ATÓMICA
+     */
+    public Long verifyAndConsumeResetCode(String resetCode) {
+        log.info("Verificando y consumiendo código de reset");
+        
+        try {
+            String pattern = RESET_PREFIX + "*";
+            Set<String> keys = redisTemplate.keys(pattern);
+            
+            if (keys == null || keys.isEmpty()) {
+                log.warn("No hay códigos de reset en Redis");
+                return null;
+            }
+
+            for (String key : keys) {
+                String storedCode = redisTemplate.opsForValue().getAndDelete(key);
+                
+                if (storedCode != null && storedCode.equals(resetCode.trim())) {
+                    Long userId = extractUserIdFromKey(key, RESET_PREFIX);
+                    if (userId != null) {
+                        log.info("Código de reset verificado y consumido para userId: {}", userId);
+                        return userId;
+                    }
                 }
             }
-        }
-        
-        log.warn("No matching reset code found");
-        return null;
-    }
-
-
-      /**
-     * Obtiene el userId asociado a un código de desbloqueo sin consumirlo
-     * Útil para validar el código antes de procesar el desbloqueo
-     */
-    public Long getUserIdByUnlockCode(String unlockCode) {
-        // Buscar en todas las keys de unlock_code
-        String pattern = "unlock_code:*";
-        var keys = redisTemplate.keys(pattern);
-        
-        if (keys == null || keys.isEmpty()) {
-            log.warn("No unlock codes found in Redis");
+            
+            log.warn("Código de reset no encontrado o inválido");
+            return null;
+            
+        } catch (Exception e) {
+            log.error("Error al verificar código de reset: {}", e.getMessage(), e);
             return null;
         }
-
-        for (String key : keys) {
-            String storedCode = redisTemplate.opsForValue().get(key);
-            if (storedCode != null && storedCode.equals(unlockCode.trim())) {
-                // Extraer userId del key "unlock_code:123"
-                String userIdStr = key.substring("unlock_code:".length());
-                try {
-                    Long userId = Long.parseLong(userIdStr);
-                    log.info("Found userId {} for unlock code", userId);
-                    return userId;
-                } catch (NumberFormatException e) {
-                    log.error("Invalid userId format in key: {}", key);
-                }
-            }
-        }
-        
-        log.warn("No matching unlock code found");
-        return null;
     }
 
     /**
-     * Verifica y consume código de reset usando solo el código
-     * Retorna el userId si es válido, null si no
+     * Reenvía código de reset con rate limiting
      */
-    public Long verifyAndConsumeResetCode(String code) {
-        Long userId = getUserIdByResetCode(code);
-        if (userId == null) {
-            return null;
+    public String resendResetCodeWithRateLimit(Long userId) {
+        if (!canRequestToken(userId, "reset")) {
+            Duration remaining = getRateLimitTimeRemaining(userId, "reset");
+            throw new RuntimeException(String.format(
+                "Demasiados intentos. Intente nuevamente en %d minutos", 
+                remaining.toMinutes()));
         }
 
-        // Consumir el código
-        String key = "reset_code:" + userId;
-        Boolean deleted = redisTemplate.delete(key);
-        
-        if (Boolean.TRUE.equals(deleted)) {
-            log.info("Reset code verified and consumed for user: {}", userId);
-            return userId;
-        }
-        
-        return null;
+        invalidateResetCode(userId);
+        return generateAndStoreResetCode(userId);
     }
 
-    // ================= UNLOCK CODE (NUEVO) =================
+    // ================= UNLOCK CODE (MEJORADO) =================
 
     /**
-     * Genera y almacena código de desbloqueo en Redis
+     * Genera y almacena código de desbloqueo
      */
     public String generateAndStoreUnlockCode(Long userId) {
-        String code = generateSixDigitCode();
-        String key = "unlock_code:" + userId;
+        String code = generateSecureCode(CODE_LENGTH);
+        String key = UNLOCK_PREFIX + userId;
 
         redisTemplate.opsForValue().set(
                 key,
                 code,
                 Duration.ofMinutes(unlockCodeExpiryMinutes));
 
-        log.info("Unlock code generated and stored in Redis for user: {}", userId);
+        log.info("Código de desbloqueo generado para usuario: {} (TTL: {} minutos)", 
+                userId, unlockCodeExpiryMinutes);
         return code;
     }
 
     /**
-     * Verifica código de desbloqueo desde Redis
+     * Verifica código de desbloqueo (sin consumir)
      */
-    public boolean verifyUnlockCode(Long userId, String code) {
-        String key = "unlock_code:" + userId;
+    public boolean isUnlockCodeValid(Long userId, String code) {
+        String key = UNLOCK_PREFIX + userId;
         String storedCode = redisTemplate.opsForValue().get(key);
-
-        if (storedCode == null || !storedCode.equals(code.trim())) {
-            log.warn("Invalid unlock code attempt for user: {}", userId);
-            return false;
-        }
-
-        // Código válido - eliminarlo para que sea de un solo uso
-        redisTemplate.delete(key);
-        log.info("Unlock code verified and consumed for user: {}", userId);
-        return true;
+        return storedCode != null && storedCode.equals(code.trim());
     }
+
+    /**
+     * Obtiene userId por código de desbloqueo
+     */
+    public Long getUserIdByUnlockCode(String unlockCode) {
+        return findUserIdByCode(UNLOCK_PREFIX + "*", unlockCode, "unlock");
+    }
+
+    /**
+     * Verifica y consume código de desbloqueo - VERSIÓN ATÓMICA
+     */
+    public Long verifyAndConsumeUnlockCode(String unlockCode) {
+        log.info("Verificando y consumiendo código de desbloqueo");
+        
+        try {
+            String pattern = UNLOCK_PREFIX + "*";
+            Set<String> keys = redisTemplate.keys(pattern);
+            
+            if (keys == null || keys.isEmpty()) {
+                log.warn("No hay códigos de desbloqueo en Redis");
+                return null;
+            }
+
+            for (String key : keys) {
+                String storedCode = redisTemplate.opsForValue().getAndDelete(key);
+                
+                if (storedCode != null && storedCode.equals(unlockCode.trim())) {
+                    Long userId = extractUserIdFromKey(key, UNLOCK_PREFIX);
+                    if (userId != null) {
+                        log.info("Código de desbloqueo verificado y consumido para userId: {}", userId);
+                        return userId;
+                    }
+                }
+            }
+            
+            log.warn("Código de desbloqueo no encontrado o inválido");
+            return null;
+            
+        } catch (Exception e) {
+            log.error("Error al verificar código de desbloqueo: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    // ================= EMAIL VERIFICATION TOKEN (MEJORADO) =================
 
     /**
      * Genera y almacena token de verificación de email
      */
     public String generateAndStoreVerificationToken(Long userId) {
-        String token = generateRandomToken();
-        String key = "verification_token:" + userId;
+        String token = generateSecureToken();
+        String key = VERIFICATION_PREFIX + userId;
 
         redisTemplate.opsForValue().set(
                 key,
                 token,
-                Duration.ofHours(24) // 24 horas para verificar email
-        );
+                Duration.ofHours(emailVerificationExpiryHours));
 
-        log.info("Verification token generated for user: {}", userId);
+        log.info("Token de verificación generado para usuario: {} (TTL: {} horas)", 
+                userId, emailVerificationExpiryHours);
         return token;
     }
 
     /**
-     * Verifica y consume token de verificación
+     * Verifica token de verificación (sin consumir)
+     */
+    public boolean isVerificationTokenValid(Long userId, String token) {
+        String key = VERIFICATION_PREFIX + userId;
+        String storedToken = redisTemplate.opsForValue().get(key);
+        return storedToken != null && storedToken.equals(token.trim());
+    }
+
+    /**
+     * Verifica y consume token de verificación - VERSIÓN ATÓMICA
      */
     public boolean verifyAndConsumeVerificationToken(Long userId, String token) {
-        String key = "verification_token:" + userId;
-        String storedToken = redisTemplate.opsForValue().get(key);
+        String key = VERIFICATION_PREFIX + userId;
+        String storedToken = redisTemplate.opsForValue().getAndDelete(key);
 
-        if (storedToken == null || !storedToken.equals(token.trim())) {
-            log.warn("Invalid verification token for user: {}", userId);
-            return false;
+        if (storedToken != null && storedToken.equals(token.trim())) {
+            log.info("Token de verificación consumido para usuario: {}", userId);
+            return true;
         }
 
-        // Token válido - eliminarlo para un solo uso
-        redisTemplate.delete(key);
-        log.info("Email verification token consumed for user: {}", userId);
-        return true;
+        log.warn("Token de verificación inválido para usuario: {}", userId);
+        return false;
     }
 
     /**
-     * Revoca token de verificación (si el usuario solicita otro)
+     * Revoca token de verificación
      */
     public void revokeVerificationToken(Long userId) {
-        String key = "verification_token:" + userId;
+        String key = VERIFICATION_PREFIX + userId;
         redisTemplate.delete(key);
-        log.info("Verification token revoked for user: {}", userId);
+        log.info("Token de verificación revocado para usuario: {}", userId);
     }
 
+    // ================= REFRESH TOKEN (MEJORADO) =================
+
     /**
-     * Genera y almacena refresh token en Redis
+     * Genera y almacena refresh token
      */
     public String generateAndStoreRefreshToken(Long userId) {
-        String token = generateRandomToken();
-        String key = "refresh_token:" + userId;
+        String token = generateSecureToken();
+        String key = REFRESH_PREFIX + userId;
 
         redisTemplate.opsForValue().set(
                 key,
                 token,
-                Duration.ofMinutes(refreshTokenExpiryMinutes));
+                Duration.ofDays(refreshTokenExpiryDays));
 
-        log.info("Refresh token generated and stored in Redis for user: {}", userId);
+        log.info("Refresh token generado para usuario: {} (TTL: {} días)", 
+                userId, refreshTokenExpiryDays);
         return token;
     }
 
     /**
-     * Verifica refresh token desde Redis
+     * Verifica refresh token (sin consumir)
      */
-    public boolean verifyRefreshToken(Long userId, String token) {
-        String key = "refresh_token:" + userId;
+    public boolean isRefreshTokenValid(Long userId, String token) {
+        String key = REFRESH_PREFIX + userId;
         String storedToken = redisTemplate.opsForValue().get(key);
-
-        if (storedToken == null || !storedToken.equals(token.trim())) {
-            log.warn("Invalid refresh token attempt for user: {}", userId);
-            return false;
-        }
-
-        // Token válido - eliminarlo para que sea de un solo uso
-        redisTemplate.delete(key);
-        log.info("Refresh token verified and consumed for user: {}", userId);
-        return true;
+        return storedToken != null && storedToken.equals(token.trim());
     }
 
     /**
-     * Verifica refresh token desde Redis y lo renueva
+     * Verifica y renueva refresh token
      */
     public String verifyAndRenewRefreshToken(Long userId, String token) {
-        String key = "refresh_token:" + userId;
+        String key = REFRESH_PREFIX + userId;
         String storedToken = redisTemplate.opsForValue().get(key);
 
         if (storedToken == null || !storedToken.equals(token.trim())) {
-            log.warn("Invalid refresh token attempt for user: {}", userId);
+            log.warn("Refresh token inválido para usuario: {}", userId);
             return null;
         }
 
-        // Generar nuevo token automáticamente
-        String newToken = generateRandomToken();
-        redisTemplate.opsForValue().set(key, newToken, Duration.ofDays(7));
+        // Generar nuevo token
+        String newToken = generateSecureToken();
+        redisTemplate.opsForValue().set(
+                key, 
+                newToken, 
+                Duration.ofDays(refreshTokenExpiryDays));
 
-        log.info("Refresh token verified and renewed for user: {}", userId);
+        log.info("Refresh token renovado para usuario: {}", userId);
         return newToken;
     }
 
     /**
-     * Revoca refresh token desde Redis
+     * Revoca refresh token
      */
-
     public void revokeRefreshToken(Long userId) {
-        String key = "refresh_token:" + userId;
+        String key = REFRESH_PREFIX + userId;
         Boolean deleted = redisTemplate.delete(key);
         if (Boolean.TRUE.equals(deleted)) {
             log.info("Refresh token revocado para usuario: {}", userId);
         }
     }
 
-    /**
-     * Agrega access token a blacklist en Redis
-     */
+    // ================= ACCESS TOKEN BLACKLIST (MEJORADO) =================
 
+    /**
+     * Agrega access token a blacklist
+     */
     public void blacklistAccessToken(String token) {
         try {
-            // Calcular tiempo restante del token
-            Date expiration = (Date) jwtUtil.extractExpiration(token);
+            java.util.Date expiration = jwtUtil.extractExpiration(token);
             Duration ttl = Duration.between(Instant.now(), expiration.toInstant());
 
             if (ttl.isPositive()) {
-                String key = "blacklist_token:" + token;
+                String key = BLACKLIST_PREFIX + token;
                 redisTemplate.opsForValue().set(key, "revoked", ttl);
-                log.info("Access token agregado a blacklist con TTL: {} minutos", ttl.toMinutes());
+                log.info("Access token agregado a blacklist (TTL: {} minutos)", ttl.toMinutes());
+            } else {
+                log.warn("Token ya expirado, no se agrega a blacklist");
             }
         } catch (Exception e) {
-            log.warn("Error al agregar token a blacklist: {}", e.getMessage());
+            log.error("Error al agregar token a blacklist: {}", e.getMessage());
         }
     }
 
@@ -433,51 +441,81 @@ public class TokenRedisService {
      * Verifica si un access token está en blacklist
      */
     public boolean isTokenBlacklisted(String token) {
-        String key = "blacklist_token:" + token;
+        String key = BLACKLIST_PREFIX + token;
         return Boolean.TRUE.equals(redisTemplate.hasKey(key));
     }
 
-    // ================= RATE LIMITING =================
+    /**
+     * Limpia tokens expirados de la blacklist (mantenimiento)
+     */
+    public long cleanupBlacklistedTokens() {
+        String pattern = BLACKLIST_PREFIX + "*";
+        Set<String> keys = redisTemplate.keys(pattern);
+        
+        if (keys == null || keys.isEmpty()) {
+            return 0;
+        }
+
+        long cleaned = 0;
+        for (String key : keys) {
+            Long ttl = redisTemplate.getExpire(key, TimeUnit.SECONDS);
+            if (ttl != null && ttl <= 0) {
+                redisTemplate.delete(key);
+                cleaned++;
+            }
+        }
+
+        log.info("Limpieza de blacklist completada. Tokens eliminados: {}", cleaned);
+        return cleaned;
+    }
+
+    // ================= RATE LIMITING (MEJORADO) =================
 
     /**
-     * Controla el rate limiting para evitar spam
-     * Máximo 3 solicitudes por hora por tipo de token
+     * Verifica si se puede solicitar un nuevo token
      */
     public boolean canRequestToken(Long userId, String tokenType) {
-        String rateLimitKey = tokenType + "_rate_limit:" + userId;
-        String count = redisTemplate.opsForValue().get(rateLimitKey);
+        String key = tokenType + RATE_LIMIT_SUFFIX + userId;
+        String count = redisTemplate.opsForValue().get(key);
 
         if (count == null) {
-            // Primera solicitud
-            redisTemplate.opsForValue().set(rateLimitKey, "1", Duration.ofHours(1));
+            redisTemplate.opsForValue().set(key, "1", Duration.ofHours(1));
+            log.debug("Primera solicitud de token tipo '{}' para usuario: {}", tokenType, userId);
             return true;
         }
 
         int currentCount = Integer.parseInt(count);
         if (currentCount >= MAX_REQUESTS_PER_HOUR) {
-            log.warn("Rate limit exceeded for user {} and token type {}", userId, tokenType);
+            log.warn("Rate limit excedido para usuario {} y tipo '{}'", userId, tokenType);
             return false;
         }
 
-        // Incrementar contador
-        redisTemplate.opsForValue().increment(rateLimitKey, 1);
+        redisTemplate.opsForValue().increment(key);
+        log.debug("Solicitud de token tipo '{}' para usuario: {} (count: {})", 
+                tokenType, userId, currentCount + 1);
         return true;
     }
 
     /**
-     * Limpia el rate limit para un usuario (uso administrativo)
+     * Obtiene el número de intentos restantes
      */
-    public void clearRateLimit(Long userId, String tokenType) {
-        String key = tokenType + "_rate_limit:" + userId;
-        redisTemplate.delete(key);
-        log.info("Rate limit cleared for user {} and token type {}", userId, tokenType);
+    public int getRemainingAttempts(Long userId, String tokenType) {
+        String key = tokenType + RATE_LIMIT_SUFFIX + userId;
+        String count = redisTemplate.opsForValue().get(key);
+        
+        if (count == null) {
+            return MAX_REQUESTS_PER_HOUR;
+        }
+        
+        int currentCount = Integer.parseInt(count);
+        return Math.max(0, MAX_REQUESTS_PER_HOUR - currentCount);
     }
 
     /**
-     * Verifica el tiempo restante del rate limit
+     * Obtiene tiempo restante del rate limit
      */
     public Duration getRateLimitTimeRemaining(Long userId, String tokenType) {
-        String key = tokenType + "_rate_limit:" + userId;
+        String key = tokenType + RATE_LIMIT_SUFFIX + userId;
         Long ttl = redisTemplate.getExpire(key, TimeUnit.SECONDS);
 
         if (ttl != null && ttl > 0) {
@@ -487,104 +525,112 @@ public class TokenRedisService {
     }
 
     /**
-     * Método mejorado de reenvío de código con rate limiting incorporado
+     * Limpia rate limit (uso administrativo)
      */
-    public String resendActivationCodeWithRateLimit(Long userId) {
-        // Verificar rate limiting
-        if (!canRequestToken(userId, "activation")) {
-            throw new RuntimeException("Too many requests. Please wait before requesting a new code.");
+    public void clearRateLimit(Long userId, String tokenType) {
+        String key = tokenType + RATE_LIMIT_SUFFIX + userId;
+        redisTemplate.delete(key);
+        log.info("Rate limit limpiado para usuario {} y tipo '{}'", userId, tokenType);
+    }
+
+    /**
+     * Limpia todos los rate limits de un usuario
+     */
+    public void clearAllRateLimits(Long userId) {
+        String[] tokenTypes = {"activation", "reset", "unlock"};
+        for (String type : tokenTypes) {
+            clearRateLimit(userId, type);
         }
-
-        // Revocar código anterior
-        invalidateActivationCode(userId);
-
-        // Generar nuevo código
-        return generateAndStoreActivationCode(userId);
+        log.info("Todos los rate limits limpiados para usuario: {}", userId);
     }
 
     // ================= MÉTODOS DE UTILIDAD =================
 
     /**
-     * Verifica si existe un código activo sin consumirlo
+     * Verifica si existe un código activo
      */
     public boolean hasActiveActivationCode(Long userId) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey("activation_code:" + userId));
+        return Boolean.TRUE.equals(redisTemplate.hasKey(ACTIVATION_PREFIX + userId));
     }
 
     public boolean hasActiveResetCode(Long userId) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey("reset_code:" + userId));
+        return Boolean.TRUE.equals(redisTemplate.hasKey(RESET_PREFIX + userId));
     }
 
     public boolean hasActiveUnlockCode(Long userId) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey("unlock_code:" + userId));
+        return Boolean.TRUE.equals(redisTemplate.hasKey(UNLOCK_PREFIX + userId));
+    }
+
+    public boolean hasActiveVerificationToken(Long userId) {
+        return Boolean.TRUE.equals(redisTemplate.hasKey(VERIFICATION_PREFIX + userId));
+    }
+
+    public boolean hasActiveRefreshToken(Long userId) {
+        return Boolean.TRUE.equals(redisTemplate.hasKey(REFRESH_PREFIX + userId));
     }
 
     /**
-     * Obtiene tiempo de vida restante del código en minutos
+     * Obtiene TTL en minutos
      */
     public long getActivationCodeTTL(Long userId) {
-        return redisTemplate.getExpire("activation_code:" + userId, TimeUnit.MINUTES);
+        Long ttl = redisTemplate.getExpire(ACTIVATION_PREFIX + userId, TimeUnit.MINUTES);
+        return ttl != null ? ttl : -1;
     }
 
     public long getResetCodeTTL(Long userId) {
-        return redisTemplate.getExpire("reset_code:" + userId, TimeUnit.MINUTES);
+        Long ttl = redisTemplate.getExpire(RESET_PREFIX + userId, TimeUnit.MINUTES);
+        return ttl != null ? ttl : -1;
     }
 
     public long getUnlockCodeTTL(Long userId) {
-        return redisTemplate.getExpire("unlock_code:" + userId, TimeUnit.MINUTES);
+        Long ttl = redisTemplate.getExpire(UNLOCK_PREFIX + userId, TimeUnit.MINUTES);
+        return ttl != null ? ttl : -1;
+    }
+
+    public long getVerificationTokenTTL(Long userId) {
+        Long ttl = redisTemplate.getExpire(VERIFICATION_PREFIX + userId, TimeUnit.HOURS);
+        return ttl != null ? ttl : -1;
+    }
+
+    public long getRefreshTokenTTL(Long userId) {
+        Long ttl = redisTemplate.getExpire(REFRESH_PREFIX + userId, TimeUnit.DAYS);
+        return ttl != null ? ttl : -1;
     }
 
     /**
-     * Invalida códigos manualmente (útil para casos especiales)
+     * Invalida códigos manualmente
      */
     public void invalidateActivationCode(Long userId) {
-        redisTemplate.delete("activation_code:" + userId);
-        log.info("Activation code manually invalidated for user: {}", userId);
+        redisTemplate.delete(ACTIVATION_PREFIX + userId);
+        log.info("Código de activación invalidado manualmente para usuario: {}", userId);
     }
 
     public void invalidateResetCode(Long userId) {
-        redisTemplate.delete("reset_code:" + userId);
-        log.info("Reset code manually invalidated for user: {}", userId);
+        redisTemplate.delete(RESET_PREFIX + userId);
+        log.info("Código de reset invalidado manualmente para usuario: {}", userId);
     }
 
     public void invalidateUnlockCode(Long userId) {
-        redisTemplate.delete("unlock_code:" + userId);
-        log.info("Unlock code manually invalidated for user: {}", userId);
+        redisTemplate.delete(UNLOCK_PREFIX + userId);
+        log.info("Código de desbloqueo invalidado manualmente para usuario: {}", userId);
     }
 
     /**
-     * Limpia todos los tokens de un usuario (útil cuando se desactiva cuenta)
+     * Invalida todos los tokens de un usuario
      */
     public void invalidateAllUserTokens(Long userId) {
         invalidateActivationCode(userId);
         invalidateResetCode(userId);
         invalidateUnlockCode(userId);
+        revokeVerificationToken(userId);
+        revokeRefreshToken(userId);
+        clearAllRateLimits(userId);
 
-        // Limpiar rate limiting también
-        redisTemplate.delete("activation_rate_limit:" + userId);
-        redisTemplate.delete("reset_rate_limit:" + userId);
-        redisTemplate.delete("unlock_rate_limit:" + userId);
-
-        log.warn("ALL tokens invalidated for user: {}", userId);
+        log.warn("TODOS los tokens invalidados para usuario: {}", userId);
     }
 
     /**
-     * Genera código de 6 dígitos
-     * Mantiene compatibilidad con tu EmailService existente
-     */
-    private String generateSixDigitCode() {
-        return String.format("%06d", new Random().nextInt(999999));
-    }
-
-    /**
-     * Genera token aleatorio
-     */
-    private String generateRandomToken() {
-        return String.format("%06d", new Random().nextInt(999999));
-    }
-
-    /**
-     * Para debugging - obtiene información de todos los tokens de un usuario
+     * Obtiene estado completo de tokens de un usuario
      */
     public TokensStatusDTO getUserTokensStatus(Long userId) {
         return TokensStatusDTO.builder()
@@ -592,13 +638,94 @@ public class TokenRedisService {
                 .hasActivationCode(hasActiveActivationCode(userId))
                 .hasResetCode(hasActiveResetCode(userId))
                 .hasUnlockCode(hasActiveUnlockCode(userId))
+                .hasVerificationToken(hasActiveVerificationToken(userId))
+                .hasRefreshToken(hasActiveRefreshToken(userId))
                 .activationCodeTTL(getActivationCodeTTL(userId))
                 .resetCodeTTL(getResetCodeTTL(userId))
                 .unlockCodeTTL(getUnlockCodeTTL(userId))
+                .verificationTokenTTL(getVerificationTokenTTL(userId))
+                .refreshTokenTTL(getRefreshTokenTTL(userId))
+                .activationRemainingAttempts(getRemainingAttempts(userId, "activation"))
+                .resetRemainingAttempts(getRemainingAttempts(userId, "reset"))
+                .unlockRemainingAttempts(getRemainingAttempts(userId, "unlock"))
                 .build();
     }
 
-    // DTO para status de tokens
+    /**
+     * Exporta todos los tokens de un usuario (para debug)
+     */
+    public Map<String, Object> exportUserTokens(Long userId) {
+        Map<String, Object> tokens = new HashMap<>();
+        
+        tokens.put("activation_code", redisTemplate.opsForValue().get(ACTIVATION_PREFIX + userId));
+        tokens.put("reset_code", redisTemplate.opsForValue().get(RESET_PREFIX + userId));
+        tokens.put("unlock_code", redisTemplate.opsForValue().get(UNLOCK_PREFIX + userId));
+        tokens.put("verification_token", redisTemplate.opsForValue().get(VERIFICATION_PREFIX + userId));
+        tokens.put("refresh_token", redisTemplate.opsForValue().get(REFRESH_PREFIX + userId));
+        tokens.put("status", getUserTokensStatus(userId));
+        
+        return tokens;
+    }
+
+    // ================= MÉTODOS PRIVADOS DE UTILIDAD =================
+
+    /**
+     * Genera código numérico seguro
+     */
+    private String generateSecureCode(int length) {
+        Random random = new Random();
+        return String.format("%0" + length + "d", random.nextInt((int) Math.pow(10, length)));
+    }
+
+    /**
+     * Genera token alfanumérico seguro
+     */
+    private String generateSecureToken() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    /**
+     * Busca userId por código (método genérico)
+     */
+    private Long findUserIdByCode(String pattern, String code, String tokenType) {
+        Set<String> keys = redisTemplate.keys(pattern);
+        
+        if (keys == null || keys.isEmpty()) {
+            log.warn("No hay códigos de tipo '{}' en Redis", tokenType);
+            return null;
+        }
+
+        for (String key : keys) {
+            String storedCode = redisTemplate.opsForValue().get(key);
+            if (storedCode != null && storedCode.equals(code.trim())) {
+                String prefix = pattern.replace("*", "");
+                Long userId = extractUserIdFromKey(key, prefix);
+                if (userId != null) {
+                    log.info("UserId {} encontrado para código de tipo '{}'", userId, tokenType);
+                    return userId;
+                }
+            }
+        }
+        
+        log.warn("No se encontró código de tipo '{}' coincidente", tokenType);
+        return null;
+    }
+
+    /**
+     * Extrae userId de una key de Redis
+     */
+    private Long extractUserIdFromKey(String key, String prefix) {
+        try {
+            String userIdStr = key.substring(prefix.length());
+            return Long.parseLong(userIdStr);
+        } catch (Exception e) {
+            log.error("Error al extraer userId de key: {}", key);
+            return null;
+        }
+    }
+
+    // ================= DTO =================
+
     @lombok.Builder
     @lombok.Data
     public static class TokensStatusDTO {
@@ -606,8 +733,15 @@ public class TokenRedisService {
         private boolean hasActivationCode;
         private boolean hasResetCode;
         private boolean hasUnlockCode;
+        private boolean hasVerificationToken;
+        private boolean hasRefreshToken;
         private long activationCodeTTL;
         private long resetCodeTTL;
         private long unlockCodeTTL;
+        private long verificationTokenTTL;
+        private long refreshTokenTTL;
+        private int activationRemainingAttempts;
+        private int resetRemainingAttempts;
+        private int unlockRemainingAttempts;
     }
 }
