@@ -238,19 +238,35 @@ public class AuthServiceImpl implements AuthService {
                 // Obtener detalles del usuario autenticado
                 UserDetails userDetails = (UserDetails) authentication.getPrincipal();
 
-                // Generar token JWT con claims adicionales
+                // ========== GENERAR ACCESS TOKEN ==========
                 Map<String, Object> extraClaims = buildTokenClaims(user);
-                String token = jwtUtil.generateToken(userDetails, extraClaims);
+                String accessToken = jwtUtil.generateToken(userDetails, extraClaims);
 
-                // Crear información del usuario usando el método factory
+                // ========== GENERAR REFRESH TOKEN ==========
+                // Primero, revocar cualquier refresh token anterior (logout implícito de sesión
+                // previa)
+                tokenRedisService.revokeRefreshToken(user.getId());
+
+                // Generar y almacenar nuevo refresh token en Redis
+                String refreshToken = tokenRedisService.generateAndStoreRefreshToken(user.getId());
+
+                // IMPRIMIR TOKENS EN CONSOLA (solo desarrollo)
+                log.info("=====================================================");
+                log.info("LOGIN EXITOSO PARA: {}", user.getEmail());
+                log.info("ACCESS TOKEN: {}", accessToken);
+                log.info("REFRESH TOKEN: {}", refreshToken);
+                log.info("EXPIRACIÓN ACCESS: {} ms ({} minutos)", jwtExpiration, jwtExpiration / 60000);
+                log.info("=====================================================");
+
+                // Crear información del usuario
                 UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
 
-                log.info("Login exitoso para usuario: {} - IP: {} - Intentos previos: {}",
+                log.info("Login exitoso para usuario: {} - IP: {}",
                         user.getEmail(),
-                        user.getLastIpAddress(),
-                        0); // Ya se resetearon
+                        user.getLastIpAddress());
 
-                return AuthResponseDTO.success(token, jwtExpiration, userInfo);
+                // Retornar AMBOS tokens
+                return AuthResponseDTO.success(accessToken, refreshToken, jwtExpiration, userInfo);
 
             } catch (BadCredentialsException e) {
                 // Incrementar intentos fallidos
@@ -883,69 +899,69 @@ public class AuthServiceImpl implements AuthService {
      * Implementación del servicio de actualización de información del usuario
      */
 
-     @Override
-     @Transactional
-     public AuthResponseDTO updateUserInfo(UpdateUserProfileDTO updateUserInfoDTO) {
-         log.info("Procesando actualización de información de usuario");
-     
-         try {
-             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-             if (authentication == null || !authentication.isAuthenticated()) {
-                 return AuthResponseDTO.error("Usuario no autenticado");
-             }
-     
-             String username = authentication.getName();
-             User user = userRepository.findByEmail(username)
-                     .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-     
-             if (updateUserInfoDTO.name() == null || updateUserInfoDTO.name().trim().isEmpty()) {
-                 return AuthResponseDTO.error("El nombre es requerido");
-             }
-     
-             if (updateUserInfoDTO.lastName() == null || updateUserInfoDTO.lastName().trim().isEmpty()) {
-                 return AuthResponseDTO.error("El apellido es requerido");
-             }
-     
-             boolean hasChanges = false;
-     
-             if (!user.getName().equals(updateUserInfoDTO.name())) {
-                 user.setName(updateUserInfoDTO.name().trim());
-                 hasChanges = true;
-             }
-     
-             if (!user.getLastName().equals(updateUserInfoDTO.lastName())) {
-                 user.setLastName(updateUserInfoDTO.lastName().trim());
-                 hasChanges = true;
-             }
-     
-             if (updateUserInfoDTO.phoneNumber() != null &&
-                     !updateUserInfoDTO.phoneNumber().equals(user.getPhoneNumber())) {
-                 user.setPhoneNumber(updateUserInfoDTO.phoneNumber().trim());
-                 user.setPhoneVerified(false);
-                 hasChanges = true;
-             }
-     
-             if (!hasChanges) {
-                 return AuthResponseDTO.success("No hay cambios para actualizar");
-             }
-     
-             userRepository.save(user);
-     
-             log.info("Información actualizada exitosamente para usuario: {}", user.getEmail());
-     
-             // Convertir User a UserInfoDTO
-             UserInfoDTO updatedInfo = UserInfoDTO.fromUser(user);
-             
-             return AuthResponseDTO.successWithUserInfo("Información actualizada exitosamente", updatedInfo);
-     
-         } catch (UsernameNotFoundException e) {
-             log.error("Usuario no encontrado al actualizar información: {}", e.getMessage());
-             return AuthResponseDTO.error("Usuario no encontrado");
-         } catch (Exception e) {
-             log.error("Error inesperado al actualizar información: {}", e.getMessage(), e);
-             return AuthResponseDTO.error("Error interno del servidor");
-         }
-     }
+    @Override
+    @Transactional
+    public AuthResponseDTO updateUserInfo(UpdateUserProfileDTO updateUserInfoDTO) {
+        log.info("Procesando actualización de información de usuario");
+
+        try {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication == null || !authentication.isAuthenticated()) {
+                return AuthResponseDTO.error("Usuario no autenticado");
+            }
+
+            String username = authentication.getName();
+            User user = userRepository.findByEmail(username)
+                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+
+            if (updateUserInfoDTO.name() == null || updateUserInfoDTO.name().trim().isEmpty()) {
+                return AuthResponseDTO.error("El nombre es requerido");
+            }
+
+            if (updateUserInfoDTO.lastName() == null || updateUserInfoDTO.lastName().trim().isEmpty()) {
+                return AuthResponseDTO.error("El apellido es requerido");
+            }
+
+            boolean hasChanges = false;
+
+            if (!user.getName().equals(updateUserInfoDTO.name())) {
+                user.setName(updateUserInfoDTO.name().trim());
+                hasChanges = true;
+            }
+
+            if (!user.getLastName().equals(updateUserInfoDTO.lastName())) {
+                user.setLastName(updateUserInfoDTO.lastName().trim());
+                hasChanges = true;
+            }
+
+            if (updateUserInfoDTO.phoneNumber() != null &&
+                    !updateUserInfoDTO.phoneNumber().equals(user.getPhoneNumber())) {
+                user.setPhoneNumber(updateUserInfoDTO.phoneNumber().trim());
+                user.setPhoneVerified(false);
+                hasChanges = true;
+            }
+
+            if (!hasChanges) {
+                return AuthResponseDTO.success("No hay cambios para actualizar");
+            }
+
+            userRepository.save(user);
+
+            log.info("Información actualizada exitosamente para usuario: {}", user.getEmail());
+
+            // Convertir User a UserInfoDTO
+            UserInfoDTO updatedInfo = UserInfoDTO.fromUser(user);
+
+            return AuthResponseDTO.successWithUserInfo("Información actualizada exitosamente", updatedInfo);
+
+        } catch (UsernameNotFoundException e) {
+            log.error("Usuario no encontrado al actualizar información: {}", e.getMessage());
+            return AuthResponseDTO.error("Usuario no encontrado");
+        } catch (Exception e) {
+            log.error("Error inesperado al actualizar información: {}", e.getMessage(), e);
+            return AuthResponseDTO.error("Error interno del servidor");
+        }
+    }
 
     @Override
     public AuthResponseDTO requestImmediateUnlock(RequestImmediateUnlockDTO requestImmediateUnlockDTO) {

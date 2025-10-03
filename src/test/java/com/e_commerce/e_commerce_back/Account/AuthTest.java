@@ -97,7 +97,7 @@ public class AuthTest {
     public void testLogin() {
         try {
             LoginDTO loginDTO = new LoginDTO(
-                TEST_EMAIL,
+                "brandonmontealegre15@gmail.com",
                 "M@mahermosa123"
             );
             

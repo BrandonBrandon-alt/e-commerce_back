@@ -4,6 +4,7 @@ import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
@@ -15,16 +16,12 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
-/**
- * Utilidad para manejar tokens JWT
- * Implementa las mejores prácticas de seguridad para JWT
- */
 @Component
 @Slf4j
 public class JwtUtil {
 
-
-    private TokenRedisService tokenRedisService;
+    // CORRECCIÓN: Usar @Lazy para evitar dependencia circular
+    private final TokenRedisService tokenRedisService;
 
     @Value("${app.jwt.secret}")
     private String secret;
@@ -33,44 +30,29 @@ public class JwtUtil {
     private Long expiration;
 
     @Value("${app.jwt.refresh-expiration}")
-    private Long refreshExpiration; // Por ejemplo: 604800000 (7 días en milisegundos)
+    private Long refreshExpiration;
 
-    /**
-     * Genera la clave secreta para firmar los tokens
-     */
+    // Constructor con @Lazy para resolver dependencia circular
+    public JwtUtil(@Lazy TokenRedisService tokenRedisService) {
+        this.tokenRedisService = tokenRedisService;
+    }
 
     private SecretKey getSigningKey() {
         return Keys.hmacShaKeyFor(secret.getBytes());
     }
 
-    /**
-     * Extrae el username del token
-     */
-
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
     }
-
-    /**
-     * Extrae la fecha de expiración del token
-     */
 
     public Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
     }
 
-    /**
-     * Extrae un claim específico del token
-     */
-
     public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
         final Claims claims = extractAllClaims(token);
         return claimsResolver.apply(claims);
     }
-
-    /**
-     * Extrae todos los claims del token
-     */
 
     private Claims extractAllClaims(String token) {
         try {
@@ -97,35 +79,19 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * Verifica si el token ha expirado
-     */
-
     public Boolean isTokenExpired(String token) {
         return extractExpiration(token).before(new Date());
     }
-
-    /**
-     * Genera un token para el usuario
-     */
 
     public String generateToken(UserDetails userDetails) {
         Map<String, Object> claims = new HashMap<>();
         return createToken(claims, userDetails.getUsername());
     }
 
-    /**
-     * Genera un token con claims adicionales
-     */
-
     public String generateToken(UserDetails userDetails, Map<String, Object> extraClaims) {
         Map<String, Object> claims = new HashMap<>(extraClaims);
         return createToken(claims, userDetails.getUsername());
     }
-
-    /**
-     * Crea el token JWT
-     */
 
     private String createToken(Map<String, Object> claims, String subject) {
         Date now = new Date();
@@ -140,17 +106,13 @@ public class JwtUtil {
                 .compact();
     }
 
-    /**
-     * Valida el token
-     */
-
+    // CORRECCIÓN: Validación con manejo seguro de tokenRedisService
     public Boolean validateToken(String token, UserDetails userDetails) {
         try {
-
-            // En tu JwtAuthenticationFilter, antes de validar el token:
-            if (tokenRedisService.isTokenBlacklisted(token)) {
+            // Verificar blacklist solo si el servicio está disponible
+            if (tokenRedisService != null && tokenRedisService.isTokenBlacklisted(token)) {
                 log.warn("Token en blacklist detectado");
-                return false; // O manejar como token inválido
+                return false;
             }
 
             final String username = extractUsername(token);
@@ -161,9 +123,6 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * Valida si el token es válido (sin verificar usuario)
-     */
     public Boolean isTokenValid(String token) {
         try {
             extractAllClaims(token);
@@ -174,9 +133,6 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * Obtiene el tiempo restante de vida del token en milisegundos
-     */
     public Long getTokenRemainingTime(String token) {
         try {
             Date expiration = extractExpiration(token);
@@ -186,18 +142,11 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * Genera un refresh token para el usuario
-     */
     public String generateRefreshToken(UserDetails userDetails) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("type", "refresh"); // Identificador del tipo de token
+        claims.put("type", "refresh");
         return createRefreshToken(claims, userDetails.getUsername());
     }
-
-    /**
-     * Crea el refresh token JWT con mayor tiempo de expiración
-     */
 
     private String createRefreshToken(Map<String, Object> claims, String subject) {
         Date now = new Date();
@@ -212,73 +161,47 @@ public class JwtUtil {
                 .compact();
     }
 
-    /**
-     * Valida si el refresh token es válido
-     */
     public Boolean isValidRefreshToken(String token) {
         try {
             Claims claims = extractAllClaims(token);
-
-            // Verificar que es un refresh token
             String tokenType = claims.get("type", String.class);
             if (!"refresh".equals(tokenType)) {
                 log.warn("Token no es un refresh token");
                 return false;
             }
-
-            // Verificar que no ha expirado
             return !isTokenExpired(token);
-
         } catch (Exception e) {
             log.error("Refresh token inválido: {}", e.getMessage());
             return false;
         }
     }
 
-    /**
-     * Genera un access token (método específico para diferenciarlo del refresh)
-     */
-
     public String generateAccessToken(UserDetails userDetails) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("type", "access"); // Identificador del tipo de token
+        claims.put("type", "access");
         return createToken(claims, userDetails.getUsername());
     }
-
-    /**
-     * Valida que el token sea un access token válido
-     */
 
     public Boolean isValidAccessToken(String token) {
         try {
             Claims claims = extractAllClaims(token);
-
-            // Verificar que es un access token
             String tokenType = claims.get("type", String.class);
             if (!"access".equals(tokenType)) {
                 log.warn("Token no es un access token");
                 return false;
             }
-
             return !isTokenExpired(token);
-
         } catch (Exception e) {
             log.error("Access token inválido: {}", e.getMessage());
             return false;
         }
     }
 
-    /**
-     * Obtiene el tiempo de expiración del access token en segundos
-     */
     public Long getAccessTokenExpiration() {
-        return expiration / 1000; // Convertir de milisegundos a segundos
+        return expiration / 1000;
     }
 
-    /**
-     * Obtiene el tiempo de expiración del refresh token en días
-     */
     public Long getRefreshTokenExpirationDays() {
-        return refreshExpiration / (1000 * 60 * 60 * 24); // Convertir a días
+        return refreshExpiration / (1000 * 60 * 60 * 24);
     }
 }
