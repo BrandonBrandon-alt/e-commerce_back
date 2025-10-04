@@ -26,6 +26,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -62,6 +63,7 @@ public class AuthServiceImpl implements AuthService {
     private Integer lockoutDurationMinutes;
 
     private final TokenRedisService tokenRedisService;
+    private final JwtSessionService jwtSessionService;
 
     /**
      * Implementación del servicio de autenticación
@@ -199,6 +201,7 @@ public class AuthServiceImpl implements AuthService {
      */
 
     @Override
+    @Transactional // IMPORTANTE: Agregar esta anotación
     public AuthResponseDTO login(LoginDTO loginDTO) {
         String normalizedEmail = loginDTO.email().toLowerCase().trim();
         log.info("Procesando login para email: {}", normalizedEmail);
@@ -238,71 +241,124 @@ public class AuthServiceImpl implements AuthService {
                 // Obtener detalles del usuario autenticado
                 UserDetails userDetails = (UserDetails) authentication.getPrincipal();
 
-                // ========== GENERAR ACCESS TOKEN ==========
-                Map<String, Object> extraClaims = buildTokenClaims(user);
-                String accessToken = jwtUtil.generateToken(userDetails, extraClaims);
+                // ========== CREAR SESIÓN COMPLETA ==========
+                String userAgent = getCurrentUserAgent();
+                String ipAddress = getCurrentIpAddress();
 
-                // ========== GENERAR REFRESH TOKEN ==========
-                // Primero, revocar cualquier refresh token anterior (logout implícito de sesión
-                // previa)
-                tokenRedisService.revokeRefreshToken(user.getId());
+                JwtSessionService.SessionTokens sessionTokens = jwtSessionService.createSession(
+                        user.getId(),
+                        user.getEmail(),
+                        userAgent,
+                        ipAddress);
 
-                // Generar y almacenar nuevo refresh token en Redis
-                String refreshToken = tokenRedisService.generateAndStoreRefreshToken(user.getId());
-
-                // IMPRIMIR TOKENS EN CONSOLA (solo desarrollo)
                 log.info("=====================================================");
                 log.info("LOGIN EXITOSO PARA: {}", user.getEmail());
-                log.info("ACCESS TOKEN: {}", accessToken);
-                log.info("REFRESH TOKEN: {}", refreshToken);
-                log.info("EXPIRACIÓN ACCESS: {} ms ({} minutos)", jwtExpiration, jwtExpiration / 60000);
+                log.info("ACCESS TOKEN: {}", sessionTokens.getAccessToken());
+                log.info("REFRESH TOKEN: {}", sessionTokens.getRefreshToken());
+                log.info("SESSION ID: {}", sessionTokens.getSessionId());
+                log.info("EXPIRACIÓN: {} segundos", sessionTokens.getExpiresIn());
                 log.info("=====================================================");
 
-                // Crear información del usuario
                 UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
 
-                log.info("Login exitoso para usuario: {} - IP: {}",
+                log.info("Login exitoso para usuario: {} - IP: {} - SessionId: {}",
                         user.getEmail(),
-                        user.getLastIpAddress());
+                        ipAddress,
+                        sessionTokens.getSessionId());
 
-                // Retornar AMBOS tokens
-                return AuthResponseDTO.success(accessToken, refreshToken, jwtExpiration, userInfo);
+                return AuthResponseDTO.success(
+                        sessionTokens.getAccessToken(),
+                        sessionTokens.getRefreshToken(),
+                        sessionTokens.getExpiresIn() * 1000,
+                        userInfo);
 
             } catch (BadCredentialsException e) {
-                // Incrementar intentos fallidos
-                user.incrementFailedLoginAttempts();
-
-                // Bloquear cuenta si se superan los intentos máximos
-                if (user.getFailedLoginAttempts() >= maxFailedAttempts) {
-                    user.lockAccount(lockoutDurationMinutes);
-                    userRepository.save(user);
-                    log.warn("Cuenta bloqueada por {} intentos fallidos: {}",
-                            maxFailedAttempts, loginDTO.email());
-                    throw new BadCredentialsException(
-                            String.format("Cuenta bloqueada por %d minutos debido a múltiples intentos fallidos",
-                                    lockoutDurationMinutes));
-                }
-
-                userRepository.save(user);
-                int remainingAttempts = maxFailedAttempts - user.getFailedLoginAttempts();
-
-                log.warn("Credenciales inválidas para email: {} - Intentos restantes: {}",
-                        loginDTO.email(), remainingAttempts);
-
-                throw new BadCredentialsException(
-                        String.format("Email o contraseña incorrectos. Intentos restantes: %d",
-                                remainingAttempts));
+                // IMPORTANTE: Manejar los intentos fallidos aquí
+                return handleFailedLoginAttempt(user, loginDTO.email());
             }
 
         } catch (UsernameNotFoundException e) {
             log.warn("Intento de login con email no registrado: {}", normalizedEmail);
             throw new BadCredentialsException("Email o contraseña incorrectos");
         } catch (BadCredentialsException e) {
-            throw e; // Re-lanzar excepciones de credenciales
+            throw e;
         } catch (Exception e) {
             log.error("Error en login para email: {}, error: {}", normalizedEmail, e.getMessage());
             throw new RuntimeException("Error interno del servidor");
         }
+    }
+
+    /**
+     * Método separado para manejar intentos fallidos de login
+     * Usa REQUIRES_NEW para crear una transacción independiente que no haga
+     * rollback
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    private AuthResponseDTO handleFailedLoginAttempt(User user, String email) {
+        // Recargar el usuario desde la BD para obtener el valor más actualizado
+        User freshUser = userRepository.findById(user.getId())
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+
+        log.info("DEBUG - Intentos fallidos ACTUALES en BD: {}", freshUser.getFailedLoginAttempts());
+
+        // Incrementar intentos fallidos
+        freshUser.incrementFailedLoginAttempts();
+
+        log.info("DEBUG - Intentos fallidos DESPUÉS de incrementar: {}", freshUser.getFailedLoginAttempts());
+
+        // Verificar si se debe bloquear la cuenta
+        if (freshUser.getFailedLoginAttempts() >= maxFailedAttempts) {
+            freshUser.lockAccount(lockoutDurationMinutes);
+            userRepository.saveAndFlush(freshUser);
+
+            log.warn("Cuenta bloqueada por {} intentos fallidos: {} - Bloqueado hasta: {}",
+                    maxFailedAttempts, email, freshUser.getAccountLockedUntil());
+
+            throw new BadCredentialsException(
+                    String.format("Cuenta bloqueada por %d minutos debido a múltiples intentos fallidos",
+                            lockoutDurationMinutes));
+        }
+
+        // Guardar y forzar flush a la BD
+        userRepository.saveAndFlush(freshUser);
+
+        // Verificar que se guardó correctamente
+        User verifiedUser = userRepository.findById(freshUser.getId()).orElse(freshUser);
+        log.info("DEBUG - Intentos fallidos VERIFICADOS en BD: {}", verifiedUser.getFailedLoginAttempts());
+
+        int remainingAttempts = maxFailedAttempts - freshUser.getFailedLoginAttempts();
+
+        log.warn("Credenciales inválidas para email: {} - Intentos fallidos: {} - Intentos restantes: {}",
+                email, freshUser.getFailedLoginAttempts(), remainingAttempts);
+
+        throw new BadCredentialsException(
+                String.format("Email o contraseña incorrectos. Intentos restantes: %d",
+                        remainingAttempts));
+    }
+
+    // Métodos auxiliares para obtener información del request
+    private String getCurrentUserAgent() {
+        // Implementación para obtener User-Agent del request
+        // Ejemplo con ServletRequestAttributes
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attributes != null) {
+            return attributes.getRequest().getHeader("User-Agent");
+        }
+        return "Unknown";
+    }
+
+    private String getCurrentIpAddress() {
+        // Implementación para obtener IP del request
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attributes != null) {
+            HttpServletRequest request = attributes.getRequest();
+            String xForwardedFor = request.getHeader("X-Forwarded-For");
+            if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+                return xForwardedFor.split(",")[0].trim();
+            }
+            return request.getRemoteAddr();
+        }
+        return "Unknown";
     }
 
     /**
@@ -319,7 +375,10 @@ public class AuthServiceImpl implements AuthService {
                 return TokenValidationDTO.invalid("Token no proporcionado");
             }
 
-            if (jwtUtil.isTokenValid(token)) {
+            // ✅ CAMBIO: Usar JwtSessionService para validación completa
+            JwtSessionService.SessionValidation validation = jwtSessionService.validateAccessToken(token);
+
+            if (validation.isValid()) {
                 String username = jwtUtil.extractUsername(token);
                 Long remainingTime = jwtUtil.getTokenRemainingTime(token);
 
@@ -331,7 +390,7 @@ public class AuthServiceImpl implements AuthService {
 
                 return TokenValidationDTO.valid(username, remainingTime);
             } else {
-                return TokenValidationDTO.invalid("Token inválido o expirado");
+                return TokenValidationDTO.invalid(validation.getReason());
             }
 
         } catch (Exception e) {
@@ -368,6 +427,7 @@ public class AuthServiceImpl implements AuthService {
      * Maneja el cierre de sesión de un usuario con seguridad mejorada
      */
 
+    // Entonces tu logout se simplifica:
     @Override
     public void logout(String authHeader) {
         try {
@@ -375,30 +435,23 @@ public class AuthServiceImpl implements AuthService {
 
             if (token != null) {
                 try {
-                    // Extraer username del token
-                    String username = jwtUtil.extractUsername(token);
+                    // ✅ BUSCAR Y CERRAR SESIÓN DIRECTAMENTE
+                    String sessionId = jwtSessionService.findSessionIdByAccessToken(token);
 
-                    // Buscar el usuario para obtener su ID
-                    Optional<User> userOpt = userRepository.findByEmail(username);
-                    if (userOpt.isPresent()) {
-                        Long userId = userOpt.get().getId();
-
-                        // Revocar el refresh token de Redis
-                        tokenRedisService.revokeRefreshToken(userId);
-
-                        // Opcional: Agregar access token a blacklist en Redis
-                        tokenRedisService.blacklistAccessToken(token);
-
-                        log.info("Logout completo para usuario: {} (ID: {})", username, userId);
+                    if (sessionId != null) {
+                        jwtSessionService.closeSession(sessionId);
+                        log.info("Sesión cerrada - SessionId: {}", sessionId);
                     } else {
-                        log.warn("Usuario no encontrado durante logout: {}", username);
+                        // Fallback: blacklist del token
+                        jwtSessionService.blacklistAccessToken(token);
+                        log.info("Token blacklisted - Sesión no encontrada");
                     }
 
                 } catch (Exception tokenException) {
                     log.warn("Intento de logout con token inválido: {}", tokenException.getMessage());
+                    jwtSessionService.blacklistAccessToken(token);
                 }
 
-                // Limpiar contexto de seguridad independientemente de si el token es válido
                 SecurityContextHolder.clearContext();
             } else {
                 log.info("Logout procesado sin token válido");
@@ -406,7 +459,7 @@ public class AuthServiceImpl implements AuthService {
 
         } catch (Exception e) {
             log.error("Error en logout: {}", e.getMessage());
-            log.warn("Logout completado a pesar del error");
+            SecurityContextHolder.clearContext();
         }
     }
 
@@ -419,29 +472,6 @@ public class AuthServiceImpl implements AuthService {
             return authHeader.substring(7);
         }
         return null;
-    }
-
-    /**
-     * Construye los claims adicionales para el JWT
-     */
-
-    private Map<String, Object> buildTokenClaims(User user) {
-        Map<String, Object> extraClaims = new HashMap<>();
-        extraClaims.put("userId", user.getId());
-        extraClaims.put("idNumber", user.getIdNumber());
-        extraClaims.put("email", user.getEmail());
-        extraClaims.put("age", user.getAge());
-        extraClaims.put("role", user.getRole().name());
-        extraClaims.put("name", user.getFullName());
-        extraClaims.put("emailVerified", user.getEmailVerified());
-        extraClaims.put("status", user.getStatus().name());
-
-        // Claims útiles para el frontend
-        if (user.getAge() != null) {
-            extraClaims.put("isMinor", user.isMinor());
-        }
-
-        return extraClaims;
     }
 
     /**
@@ -666,67 +696,6 @@ public class AuthServiceImpl implements AuthService {
      * Implementación del servicio de refresco de token
      */
 
-    @Override
-    public AuthResponseDTO refreshToken(RefreshTokenDTO refreshTokenDTO) {
-        try {
-            String refreshToken = refreshTokenDTO.refreshToken();
-
-            if (refreshToken == null || refreshToken.trim().isEmpty()) {
-                log.warn("Intento de refresh con token vacío");
-                return AuthResponseDTO.error("Refresh token no proporcionado");
-            }
-
-            if (!jwtUtil.isValidRefreshToken(refreshToken)) {
-                log.warn("Refresh token con formato inválido");
-                return AuthResponseDTO.error("Refresh token inválido");
-            }
-
-            String username = jwtUtil.extractUsername(refreshToken);
-            if (username == null) {
-                log.warn("No se pudo extraer username del refresh token");
-                return AuthResponseDTO.error("Refresh token inválido");
-            }
-
-            User user = userRepository.findByEmail(username).orElse(null);
-
-            if (user == null) {
-                log.warn("Usuario no encontrado para refresh token: {}", username);
-                return AuthResponseDTO.error("Usuario no encontrado");
-            }
-
-            if (!user.isEnabled()) {
-                log.warn("Intento de refresh token con usuario inactivo: {}", username);
-                return AuthResponseDTO.error("Usuario inactivo");
-            }
-
-            if (user.isAccountTemporarilyLocked()) {
-                log.warn("Intento de refresh token con cuenta bloqueada: {}", username);
-                return AuthResponseDTO.error("Cuenta bloqueada");
-            }
-
-            // Verificar y renovar refresh token en Redis
-            String newRefreshToken = tokenRedisService.verifyAndRenewRefreshToken(user.getId(), refreshToken);
-
-            if (newRefreshToken == null) {
-                log.warn("Refresh token no válido o expirado en Redis para usuario: {}", username);
-                return AuthResponseDTO.error("Refresh token expirado o inválido");
-            }
-
-            // Generar nuevo access token
-            Map<String, Object> extraClaims = buildTokenClaims(user);
-            String newAccessToken = jwtUtil.generateToken(user, extraClaims);
-
-            log.info("Tokens renovados exitosamente para usuario: {}", username);
-
-            // ✅ CORRECCIÓN: Usar el método factory correcto
-            return AuthResponseDTO.refreshSuccess(newAccessToken, newRefreshToken, jwtExpiration);
-
-        } catch (Exception e) {
-            log.error("Error inesperado en refresh token: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error al renovar tokens");
-        }
-    }
-
     /**
      * Implementación del servicio de cambio de contraseña
      */
@@ -786,12 +755,13 @@ public class AuthServiceImpl implements AuthService {
 
             log.info("Contraseña cambiada exitosamente para usuario: {}", user.getEmail());
 
-            // 8. Opcional: Revocar tokens existentes por seguridad
+            // 8. ✅ CAMBIO PRINCIPAL: Revocar TODAS las sesiones existentes por seguridad
             try {
-                tokenRedisService.revokeRefreshToken(user.getId());
-                log.info("Refresh tokens revocados después de cambio de contraseña para: {}", username);
+                jwtSessionService.closeAllUserSessions(user.getId());
+                log.info("TODAS las sesiones revocadas después de cambio de contraseña para: {}", username);
             } catch (Exception e) {
-                log.warn("Error revocando tokens después de cambio de contraseña: {}", e.getMessage());
+                log.warn("Error revocando sesiones después de cambio de contraseña: {}", e.getMessage());
+                // No lanzamos excepción porque el cambio de contraseña ya fue exitoso
             }
 
             // 9. Opcional: Notificar por email
@@ -801,7 +771,8 @@ public class AuthServiceImpl implements AuthService {
                 log.warn("Error enviando email de confirmación: {}", e.getMessage());
             }
 
-            return AuthResponseDTO.success("Contraseña cambiada exitosamente. Por seguridad, vuelve a iniciar sesión.");
+            return AuthResponseDTO.success(
+                    "Contraseña cambiada exitosamente. Por seguridad, todas tus sesiones activas han sido cerradas.");
 
         } catch (UsernameNotFoundException e) {
             log.error("Usuario no encontrado al cambiar contraseña: {}", e.getMessage());
@@ -995,6 +966,63 @@ public class AuthServiceImpl implements AuthService {
         } catch (Exception e) {
             log.error("Error al solicitar desbloqueo inmediato: {}", e.getMessage(), e);
             return AuthResponseDTO.error("Error al enviar el código");
+        }
+    }
+
+    @Override
+    public AuthResponseDTO refreshToken(RefreshTokenDTO refreshTokenDTO) {
+        try {
+            String refreshToken = refreshTokenDTO.refreshToken();
+
+            if (refreshToken == null || refreshToken.trim().isEmpty()) {
+                log.warn("Intento de refresh con token vacío");
+                return AuthResponseDTO.error("Refresh token no proporcionado");
+            }
+
+            // Usar el JwtSessionService para refrescar
+            JwtSessionService.SessionTokens newTokens = jwtSessionService.refreshAccessToken(refreshToken);
+
+            // ✅ ALTERNATIVA: Extraer userId directamente del JWT
+            String accessToken = newTokens.getAccessToken();
+            String username = jwtUtil.extractUsername(accessToken);
+
+            if (username == null) {
+                log.warn("No se pudo extraer username del access token renovado");
+                return AuthResponseDTO.error("Error al renovar tokens");
+            }
+
+            // Obtener usuario por email (username)
+            User user = userRepository.findByEmail(username)
+                    .orElseThrow(() -> new RuntimeException("Usuario no encontrado: " + username));
+
+            // Validaciones de usuario
+            if (!user.isEnabled()) {
+                log.warn("Intento de refresh token con usuario inactivo: {}", user.getEmail());
+                return AuthResponseDTO.error("Usuario inactivo");
+            }
+
+            if (user.isAccountTemporarilyLocked()) {
+                log.warn("Intento de refresh token con cuenta bloqueada: {}", user.getEmail());
+                return AuthResponseDTO.error("Cuenta bloqueada");
+            }
+
+            UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
+
+            log.info("Tokens renovados exitosamente para usuario: {} - SessionId: {}",
+                    user.getEmail(), newTokens.getSessionId());
+
+            return AuthResponseDTO.success(
+                    newTokens.getAccessToken(),
+                    newTokens.getRefreshToken(),
+                    newTokens.getExpiresIn() * 1000,
+                    userInfo);
+
+        } catch (RuntimeException e) {
+            log.warn("Error en refresh token: {}", e.getMessage());
+            return AuthResponseDTO.error(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error inesperado en refresh token: {}", e.getMessage(), e);
+            return AuthResponseDTO.error("Error al renovar tokens");
         }
     }
 

@@ -31,7 +31,7 @@ import java.util.Objects;
 @NoArgsConstructor
 @AllArgsConstructor
 @SuperBuilder
-@ToString(exclude = { "password", "token", "orders",
+@ToString(exclude = { "password", "orders",
         "addresses", "cart" })
 public class User extends BaseAuditableEntity implements UserDetails {
 
@@ -89,9 +89,6 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private EnumStatus status = EnumStatus.INACTIVE;
-
-    @Column(name = "token", length = 500)
-    private String token;
 
     @Column(name = "last_login")
     private LocalDateTime lastLogin;

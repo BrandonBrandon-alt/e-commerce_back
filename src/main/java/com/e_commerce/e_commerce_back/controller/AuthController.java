@@ -38,12 +38,12 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> login(@Valid @RequestBody LoginDTO loginDTO) {
         log.info("Intento de login para email: {}", loginDTO.email());
-        
+
         try {
             AuthResponseDTO response = authService.login(loginDTO);
             log.info("Login exitoso para email: {}", loginDTO.email());
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error en login para email: {}, error: {}", loginDTO.email(), e.getMessage());
             throw e;
@@ -62,12 +62,12 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> register(@Valid @RequestBody RegisterUserDTO createUserDTO) {
         log.info("Intento de registro para email: {}", createUserDTO.email());
-        
+
         try {
             AuthResponseDTO response = authService.register(createUserDTO);
             log.info("Registro exitoso para email: {}", createUserDTO.email());
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
-            
+
         } catch (Exception e) {
             log.error("Error en registro para email: {}, error: {}", createUserDTO.email(), e.getMessage());
             throw e;
@@ -85,11 +85,11 @@ public class AuthController {
     })
     public ResponseEntity<TokenValidationDTO> validateToken(@RequestHeader("Authorization") String authHeader) {
         log.debug("Validando token JWT");
-        
+
         try {
             TokenValidationDTO response = authService.validateToken(authHeader);
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error validando token: {}", e.getMessage());
             throw e;
@@ -107,11 +107,11 @@ public class AuthController {
     })
     public ResponseEntity<UserInfoDTO> getCurrentUser() {
         log.debug("Obteniendo información del usuario autenticado");
-        
+
         try {
             UserInfoDTO userInfo = authService.getCurrentUserInfo();
             return ResponseEntity.ok(userInfo);
-            
+
         } catch (Exception e) {
             log.error("Error obteniendo información del usuario: {}", e.getMessage());
             throw e;
@@ -129,11 +129,11 @@ public class AuthController {
     })
     public ResponseEntity<String> logout(@RequestHeader("Authorization") String authHeader) {
         log.info("Cerrando sesión");
-        
+
         try {
             authService.logout(authHeader);
             return ResponseEntity.ok("Sesión cerrada exitosamente");
-            
+
         } catch (Exception e) {
             log.error("Error en logout: {}", e.getMessage());
             throw e;
@@ -152,12 +152,12 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> activateAccount(@Valid @RequestBody ActivateAccountDTO activateAccountDTO) {
         log.info("Intento de activación de cuenta con código");
-        
+
         try {
             AuthResponseDTO response = authService.activateAccount(activateAccountDTO);
             log.info("Activación de cuenta procesada exitosamente");
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error en activación de cuenta: {}", e.getMessage());
             throw e;
@@ -176,15 +176,15 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> resendActivationCode(@Valid @RequestBody ResendActivationCodeDTO resendDTO) {
         log.info("Intento de reenvío de código para email: {}", resendDTO.email());
-        
+
         try {
             AuthResponseDTO response = authService.resendActivationCode(resendDTO.email());
             log.info("Reenvío procesado para email: {}", resendDTO.email());
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
-            log.error("Error en reenvío para email: {}, error: {}", 
-                     resendDTO.email(), e.getMessage());
+            log.error("Error en reenvío para email: {}, error: {}",
+                    resendDTO.email(), e.getMessage());
             throw e;
         }
     }
@@ -200,15 +200,15 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> forgotPassword(@Valid @RequestBody ForgotPasswordDTO forgotPasswordDTO) {
         log.info("Solicitud de reseteo de contraseña para email: {}", forgotPasswordDTO.email());
-        
+
         try {
             AuthResponseDTO response = authService.forgotPassword(forgotPasswordDTO);
             log.info("Solicitud de reseteo procesada para email: {}", forgotPasswordDTO.email());
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
-            log.error("Error en solicitud de reseteo para email: {}, error: {}", 
-                     forgotPasswordDTO.email(), e.getMessage());
+            log.error("Error en solicitud de reseteo para email: {}, error: {}",
+                    forgotPasswordDTO.email(), e.getMessage());
             throw e;
         }
     }
@@ -225,12 +225,12 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> resetPassword(@Valid @RequestBody ResetPasswordDTO resetPasswordDTO) {
         log.info("Intento de reseteo de contraseña con código");
-        
+
         try {
             AuthResponseDTO response = authService.resetPassword(resetPasswordDTO);
             log.info("Reseteo de contraseña procesado exitosamente");
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error en reseteo de contraseña: {}", e.getMessage());
             throw e;
@@ -248,12 +248,12 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> refreshToken(@Valid @RequestBody RefreshTokenDTO refreshTokenDTO) {
         log.info("Solicitud de refresh token");
-        
+
         try {
             AuthResponseDTO response = authService.refreshToken(refreshTokenDTO);
             log.info("Token refrescado exitosamente");
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error refrescando token: {}", e.getMessage());
             throw e;
@@ -272,12 +272,12 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> changePassword(@Valid @RequestBody ChangePasswordDTO changePasswordDTO) {
         log.info("Solicitud de cambio de contraseña");
-        
+
         try {
             AuthResponseDTO response = authService.changePassword(changePasswordDTO);
             log.info("Contraseña cambiada exitosamente");
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error cambiando contraseña: {}", e.getMessage());
             throw e;
@@ -297,12 +297,12 @@ public class AuthController {
     })
     public ResponseEntity<AuthResponseDTO> changeEmail(@Valid @RequestBody ChangeEmailDTO changeEmailDTO) {
         log.info("Solicitud de cambio de email");
-        
+
         try {
             AuthResponseDTO response = authService.changeEmail(changeEmailDTO);
             log.info("Email cambiado exitosamente");
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error cambiando email: {}", e.getMessage());
             throw e;
@@ -319,14 +319,15 @@ public class AuthController {
             @ApiResponse(responseCode = "400", description = "Datos inválidos"),
             @ApiResponse(responseCode = "401", description = "No autenticado")
     })
-    public ResponseEntity<AuthResponseDTO> updateProfile(@Valid @RequestBody UpdateUserProfileDTO updateUserProfileDTO) {
+    public ResponseEntity<AuthResponseDTO> updateProfile(
+            @Valid @RequestBody UpdateUserProfileDTO updateUserProfileDTO) {
         log.info("Solicitud de actualización de perfil");
-        
+
         try {
             AuthResponseDTO response = authService.updateUserInfo(updateUserProfileDTO);
             log.info("Perfil actualizado exitosamente");
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error actualizando perfil: {}", e.getMessage());
             throw e;
@@ -342,17 +343,18 @@ public class AuthController {
             @ApiResponse(responseCode = "200", description = "Código de desbloqueo enviado"),
             @ApiResponse(responseCode = "400", description = "Cuenta no bloqueada o demasiadas solicitudes")
     })
-    public ResponseEntity<AuthResponseDTO> requestUnlock(@Valid @RequestBody RequestImmediateUnlockDTO requestImmediateUnlockDTO) {
+    public ResponseEntity<AuthResponseDTO> requestUnlock(
+            @Valid @RequestBody RequestImmediateUnlockDTO requestImmediateUnlockDTO) {
         log.info("Solicitud de desbloqueo para email: {}", requestImmediateUnlockDTO.email());
-        
+
         try {
             AuthResponseDTO response = authService.requestImmediateUnlock(requestImmediateUnlockDTO);
             log.info("Solicitud de desbloqueo procesada para email: {}", requestImmediateUnlockDTO.email());
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
-            log.error("Error en solicitud de desbloqueo para email: {}, error: {}", 
-                     requestImmediateUnlockDTO.email(), e.getMessage());
+            log.error("Error en solicitud de desbloqueo para email: {}, error: {}",
+                    requestImmediateUnlockDTO.email(), e.getMessage());
             throw e;
         }
     }
@@ -367,14 +369,15 @@ public class AuthController {
             @ApiResponse(responseCode = "400", description = "Código inválido o expirado"),
             @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
     })
-    public ResponseEntity<AuthResponseDTO> verifyUnlockCode(@Valid @RequestBody VerifyUnlockCodeDTO verifyUnlockCodeDTO) {
+    public ResponseEntity<AuthResponseDTO> verifyUnlockCode(
+            @Valid @RequestBody VerifyUnlockCodeDTO verifyUnlockCodeDTO) {
         log.info("Intento de verificación de código de desbloqueo");
-        
+
         try {
             AuthResponseDTO response = authService.verifyUnlockCode(verifyUnlockCodeDTO);
             log.info("Verificación de código de desbloqueo procesada exitosamente");
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             log.error("Error verificando código de desbloqueo: {}", e.getMessage());
             throw e;

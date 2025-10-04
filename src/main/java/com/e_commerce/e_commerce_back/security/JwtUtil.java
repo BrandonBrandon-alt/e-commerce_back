@@ -32,6 +32,27 @@ public class JwtUtil {
     @Value("${app.jwt.refresh-expiration}")
     private Long refreshExpiration;
 
+
+    /**
+     * Genera un access token estándar con sub=email y claims mínimos.
+     * Claims:
+     *  - uid: userId (Long)
+     *  - sid: sessionId (String)
+     *  - typ: "access"
+     */
+    public String generateAccessToken(String email, Long userId, String sessionId) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("uid", userId);
+        claims.put("sid", sessionId);
+        claims.put("typ", "access");
+        return createToken(claims, email);
+    }
+
+    // Método genérico por si se requieren claims adicionales explícitos
+    public String generateToken(String subject, Map<String, Object> extraClaims) {
+        return createToken(extraClaims != null ? extraClaims : new HashMap<>(), subject);
+    }
+
     // Constructor con @Lazy para resolver dependencia circular
     public JwtUtil(@Lazy TokenRedisService tokenRedisService) {
         this.tokenRedisService = tokenRedisService;
@@ -52,6 +73,31 @@ public class JwtUtil {
     public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
         final Claims claims = extractAllClaims(token);
         return claimsResolver.apply(claims);
+    }
+
+    public Long extractUserId(String token) {
+        try {
+            Claims claims = extractAllClaims(token);
+            Object uid = claims.get("uid");
+            if (uid instanceof Number) {
+                return ((Number) uid).longValue();
+            }
+            if (uid instanceof String) {
+                return Long.parseLong((String) uid);
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public String extractSessionId(String token) {
+        try {
+            Claims claims = extractAllClaims(token);
+            return claims.get("sid", String.class);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private Claims extractAllClaims(String token) {
@@ -116,7 +162,18 @@ public class JwtUtil {
             }
 
             final String username = extractUsername(token);
-            return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+            if (!username.equals(userDetails.getUsername()) || isTokenExpired(token)) {
+                return false;
+            }
+
+            // Validar tipo de token = access
+            try {
+                Claims claims = extractAllClaims(token);
+                String type = claims.get("typ", String.class);
+                return "access".equals(type);
+            } catch (Exception e) {
+                return false;
+            }
         } catch (Exception e) {
             log.error("Error validando token JWT: {}", e.getMessage());
             return false;
@@ -176,17 +233,11 @@ public class JwtUtil {
         }
     }
 
-    public String generateAccessToken(UserDetails userDetails) {
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("type", "access");
-        return createToken(claims, userDetails.getUsername());
-    }
-
     public Boolean isValidAccessToken(String token) {
         try {
             Claims claims = extractAllClaims(token);
             String tokenType = claims.get("type", String.class);
-            if (!"access".equals(tokenType)) {
+            if (!"access".equals(tokenType) && !"access".equals(claims.get("typ", String.class))) {
                 log.warn("Token no es un access token");
                 return false;
             }

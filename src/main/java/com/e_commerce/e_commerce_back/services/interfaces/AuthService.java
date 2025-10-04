@@ -34,12 +34,6 @@ public interface AuthService {
      * @return Información de validación del token
      */
     TokenValidationDTO validateToken(String authHeader);
-    /**
-     * Genera un nuevo token JWT
-     * @param refreshTokenDTO
-     * @return
-     */
-    AuthResponseDTO refreshToken(RefreshTokenDTO refreshTokenDTO); 
     
     //-------------------GESTION DEL USUARIO AUTHENTICADO-------------------//
     /**
@@ -47,6 +41,12 @@ public interface AuthService {
      * @return Información del usuario
      */
     UserInfoDTO getCurrentUserInfo();
+
+    /**
+     * Obtiene información del usuario autenticado actual
+     * @return Información del usuario
+     */
+    AuthResponseDTO refreshToken(RefreshTokenDTO refreshTokenDTO);
     
     /**
      * Cambia la contraseña del usuario autenticado actual

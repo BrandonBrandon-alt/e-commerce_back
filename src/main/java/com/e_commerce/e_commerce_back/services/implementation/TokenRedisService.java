@@ -2,6 +2,8 @@ package com.e_commerce.e_commerce_back.services.implementation;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -18,12 +20,19 @@ import java.util.concurrent.TimeUnit;
  * Implementa operaciones atómicas, rate limiting, y gestión completa de tokens
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class TokenRedisService {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final JwtUtil jwtUtil;
+
+    // Constructor con @Qualifier para especificar el bean correcto
+    public TokenRedisService(
+            @Qualifier("customStringRedisTemplate") RedisTemplate<String, String> redisTemplate,
+            JwtUtil jwtUtil) {
+        this.redisTemplate = redisTemplate;
+        this.jwtUtil = jwtUtil;
+    }
 
     // Configuraciones desde application.properties
     @Value("${app.email.activation-code-expiry-minutes:15}")
@@ -34,9 +43,6 @@ public class TokenRedisService {
 
     @Value("${app.security.unlock-code-expiry-minutes:15}")
     private Integer unlockCodeExpiryMinutes;
-
-    @Value("${app.security.refresh-token-expiry-days:7}")
-    private Integer refreshTokenExpiryDays;
 
     @Value("${app.security.email-verification-expiry-hours:24}")
     private Integer emailVerificationExpiryHours;
@@ -50,7 +56,6 @@ public class TokenRedisService {
     private static final String RESET_PREFIX = "reset_code:";
     private static final String UNLOCK_PREFIX = "unlock_code:";
     private static final String VERIFICATION_PREFIX = "verification_token:";
-    private static final String REFRESH_PREFIX = "refresh_token:";
     private static final String BLACKLIST_PREFIX = "blacklist_token:";
     private static final String RATE_LIMIT_SUFFIX = "_rate_limit:";
 
@@ -126,8 +131,8 @@ public class TokenRedisService {
         if (!canRequestToken(userId, "activation")) {
             Duration remaining = getRateLimitTimeRemaining(userId, "activation");
             throw new RuntimeException(String.format(
-                "Demasiados intentos. Intente nuevamente en %d minutos", 
-                remaining.toMinutes()));
+                    "Demasiados intentos. Intente nuevamente en %d minutos",
+                    remaining.toMinutes()));
         }
 
         invalidateActivationCode(userId);
@@ -201,8 +206,8 @@ public class TokenRedisService {
         if (!canRequestToken(userId, "reset")) {
             Duration remaining = getRateLimitTimeRemaining(userId, "reset");
             throw new RuntimeException(String.format(
-                "Demasiados intentos. Intente nuevamente en %d minutos", 
-                remaining.toMinutes()));
+                    "Demasiados intentos. Intente nuevamente en %d minutos",
+                    remaining.toMinutes()));
         }
 
         invalidateResetCode(userId);
@@ -279,12 +284,12 @@ public class TokenRedisService {
         String key = VERIFICATION_PREFIX + userId;
 
         redisTemplate.opsForValue().set(
-            key,
-            token,
-            Duration.ofHours(emailVerificationExpiryHours));
+                key,
+                token,
+                Duration.ofHours(emailVerificationExpiryHours));
 
-        log.info("Token de verificación generado para usuario: {} (TTL: {} horas)", 
-            userId, emailVerificationExpiryHours);
+        log.info("Token de verificación generado para usuario: {} (TTL: {} horas)",
+                userId, emailVerificationExpiryHours);
         return token;
     }
 
@@ -320,68 +325,6 @@ public class TokenRedisService {
         String key = VERIFICATION_PREFIX + userId;
         redisTemplate.delete(key);
         log.info("Token de verificación revocado para usuario: {}", userId);
-    }
-
-    // ================= REFRESH TOKEN (MEJORADO) =================
-
-    /**
-     * Genera y almacena refresh token
-     */
-    public String generateAndStoreRefreshToken(Long userId) {
-        String token = generateSecureToken();
-        String key = REFRESH_PREFIX + userId;
-
-        redisTemplate.opsForValue().set(
-            key,
-            token,
-            Duration.ofDays(refreshTokenExpiryDays));
-
-        log.info("Refresh token generado para usuario: {} (TTL: {} días)", 
-            userId, refreshTokenExpiryDays);
-        return token;
-    }
-
-    /**
-     * Verifica refresh token (sin consumir)
-     */
-    public boolean isRefreshTokenValid(Long userId, String token) {
-        String key = REFRESH_PREFIX + userId;
-        String storedToken = redisTemplate.opsForValue().get(key);
-        return storedToken != null && storedToken.equals(token.trim());
-    }
-
-    /**
-     * Verifica y renueva refresh token
-     */
-    public String verifyAndRenewRefreshToken(Long userId, String token) {
-        String key = REFRESH_PREFIX + userId;
-        String storedToken = redisTemplate.opsForValue().get(key);
-
-        if (storedToken == null || !storedToken.equals(token.trim())) {
-            log.warn("Refresh token inválido para usuario: {}", userId);
-            return null;
-        }
-
-        // Generar nuevo token
-        String newToken = generateSecureToken();
-        redisTemplate.opsForValue().set(
-            key, 
-            newToken, 
-            Duration.ofDays(refreshTokenExpiryDays));
-
-        log.info("Refresh token renovado para usuario: {}", userId);
-        return newToken;
-    }
-
-    /**
-     * Revoca refresh token
-     */
-    public void revokeRefreshToken(Long userId) {
-        String key = REFRESH_PREFIX + userId;
-        Boolean deleted = redisTemplate.delete(key);
-        if (Boolean.TRUE.equals(deleted)) {
-            log.info("Refresh token revocado para usuario: {}", userId);
-        }
     }
 
     // ================= ACCESS TOKEN BLACKLIST (MEJORADO) =================
@@ -436,8 +379,8 @@ public class TokenRedisService {
         }
 
         redisTemplate.opsForValue().increment(key);
-        log.debug("Solicitud de token tipo '{}' para usuario: {} (count: {})", 
-            tokenType, userId, currentCount + 1);
+        log.debug("Solicitud de token tipo '{}' para usuario: {} (count: {})",
+                tokenType, userId, currentCount + 1);
         return true;
     }
 
@@ -447,11 +390,11 @@ public class TokenRedisService {
     public int getRemainingAttempts(Long userId, String tokenType) {
         String key = tokenType + RATE_LIMIT_SUFFIX + userId;
         String count = redisTemplate.opsForValue().get(key);
-        
+
         if (count == null) {
             return MAX_REQUESTS_PER_HOUR;
         }
-        
+
         int currentCount = Integer.parseInt(count);
         return Math.max(0, MAX_REQUESTS_PER_HOUR - currentCount);
     }
@@ -482,7 +425,7 @@ public class TokenRedisService {
      * Limpia todos los rate limits de un usuario
      */
     public void clearAllRateLimits(Long userId) {
-        String[] tokenTypes = {"activation", "reset", "unlock"};
+        String[] tokenTypes = { "activation", "reset", "unlock" };
         for (String type : tokenTypes) {
             clearRateLimit(userId, type);
         }
@@ -510,10 +453,6 @@ public class TokenRedisService {
         return Boolean.TRUE.equals(redisTemplate.hasKey(VERIFICATION_PREFIX + userId));
     }
 
-    public boolean hasActiveRefreshToken(Long userId) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey(REFRESH_PREFIX + userId));
-    }
-
     /**
      * Obtiene TTL en minutos
      */
@@ -537,50 +476,45 @@ public class TokenRedisService {
         return ttl != null ? ttl : -1;
     }
 
-    public long getRefreshTokenTTL(Long userId) {
-        Long ttl = redisTemplate.getExpire(REFRESH_PREFIX + userId, TimeUnit.DAYS);
-        return ttl != null ? ttl : -1;
-    }
-
     /**
      * Invalida códigos manualmente
      */
     public void invalidateActivationCode(Long userId) {
         String mainKey = ACTIVATION_PREFIX + userId;
         String code = redisTemplate.opsForValue().get(mainKey);
-        
+
         if (code != null) {
             String mappingKey = getMappingKey("activation", code);
             redisTemplate.delete(mappingKey);
         }
         redisTemplate.delete(mainKey);
-        
+
         log.info("Código de activación invalidado manualmente para usuario: {}", userId);
     }
 
     public void invalidateResetCode(Long userId) {
         String mainKey = RESET_PREFIX + userId;
         String code = redisTemplate.opsForValue().get(mainKey);
-        
+
         if (code != null) {
             String mappingKey = getMappingKey("reset", code);
             redisTemplate.delete(mappingKey);
         }
         redisTemplate.delete(mainKey);
-        
+
         log.info("Código de reset invalidado manualmente para usuario: {}", userId);
     }
 
     public void invalidateUnlockCode(Long userId) {
         String mainKey = UNLOCK_PREFIX + userId;
         String code = redisTemplate.opsForValue().get(mainKey);
-        
+
         if (code != null) {
             String mappingKey = getMappingKey("unlock", code);
             redisTemplate.delete(mappingKey);
         }
         redisTemplate.delete(mainKey);
-        
+
         log.info("Código de desbloqueo invalidado manualmente para usuario: {}", userId);
     }
 
@@ -592,7 +526,6 @@ public class TokenRedisService {
         invalidateResetCode(userId);
         invalidateUnlockCode(userId);
         revokeVerificationToken(userId);
-        revokeRefreshToken(userId);
         clearAllRateLimits(userId);
 
         log.warn("TODOS los tokens invalidados para usuario: {}", userId);
@@ -608,12 +541,10 @@ public class TokenRedisService {
                 .hasResetCode(hasActiveResetCode(userId))
                 .hasUnlockCode(hasActiveUnlockCode(userId))
                 .hasVerificationToken(hasActiveVerificationToken(userId))
-                .hasRefreshToken(hasActiveRefreshToken(userId))
                 .activationCodeTTL(getActivationCodeTTL(userId))
                 .resetCodeTTL(getResetCodeTTL(userId))
                 .unlockCodeTTL(getUnlockCodeTTL(userId))
                 .verificationTokenTTL(getVerificationTokenTTL(userId))
-                .refreshTokenTTL(getRefreshTokenTTL(userId))
                 .activationRemainingAttempts(getRemainingAttempts(userId, "activation"))
                 .resetRemainingAttempts(getRemainingAttempts(userId, "reset"))
                 .unlockRemainingAttempts(getRemainingAttempts(userId, "unlock"))
@@ -643,11 +574,11 @@ public class TokenRedisService {
     private void storeCodeToUserIdMapping(String code, Long userId, String type) {
         String mappingKey = getMappingKey(type, code);
         int expiryMinutes = getExpiryMinutesForType(type);
-        
+
         redisTemplate.opsForValue().set(
-            mappingKey,
-            userId.toString(),
-            Duration.ofMinutes(expiryMinutes));
+                mappingKey,
+                userId.toString(),
+                Duration.ofMinutes(expiryMinutes));
     }
 
     /**
@@ -683,12 +614,10 @@ public class TokenRedisService {
         private boolean hasResetCode;
         private boolean hasUnlockCode;
         private boolean hasVerificationToken;
-        private boolean hasRefreshToken;
         private long activationCodeTTL;
         private long resetCodeTTL;
         private long unlockCodeTTL;
         private long verificationTokenTTL;
-        private long refreshTokenTTL;
         private int activationRemainingAttempts;
         private int resetRemainingAttempts;
         private int unlockRemainingAttempts;
