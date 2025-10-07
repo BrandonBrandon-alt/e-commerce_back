@@ -2,7 +2,6 @@ package com.e_commerce.e_commerce_back.services.implementation;
 
 import com.e_commerce.e_commerce_back.dto.AuthResponseDTO;
 import com.e_commerce.e_commerce_back.dto.ForgotPasswordDTO;
-import com.e_commerce.e_commerce_back.dto.LoginDTO;
 import com.e_commerce.e_commerce_back.dto.ActivateAccountDTO;
 import com.e_commerce.e_commerce_back.dto.RegisterUserDTO;
 import com.e_commerce.e_commerce_back.dto.TokenValidationDTO;
@@ -78,7 +77,6 @@ class AuthServiceImplTest {
                 .role(EnumRole.USER)
                 .status(EnumStatus.INACTIVE)
                 .emailVerified(false)
-                .failedLoginAttempts(0)
                 .build();
     }
 
@@ -108,7 +106,6 @@ class AuthServiceImplTest {
                 .role(EnumRole.USER)
                 .status(EnumStatus.INACTIVE)
                 .emailVerified(false)
-                .failedLoginAttempts(0)
                 .build();
 
         when(userRepository.save(any(User.class))).thenReturn(saved);
@@ -171,7 +168,6 @@ class AuthServiceImplTest {
                 .email("user@test.com")
                 .status(EnumStatus.ACTIVE)
                 .emailVerified(true)
-                .failedLoginAttempts(0)
                 .build();
         when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
 

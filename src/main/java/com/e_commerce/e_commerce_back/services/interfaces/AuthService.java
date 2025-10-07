@@ -56,10 +56,28 @@ public interface AuthService {
     
 
     /**
-     * Cambia el email del usuario autenticado actual
+     * @deprecated Usar requestEmailChange() y verifyEmailChange() en su lugar
+     * Cambia el email del usuario autenticado actual (INSEGURO - cambia sin verificar acceso al nuevo email)
      * @param changeEmailDTO Datos de cambio de email
      */
+    @Deprecated
     AuthResponseDTO changeEmail(ChangeEmailDTO changeEmailDTO);
+
+    /**
+     * Paso 1: Solicita cambio de email y envía código de verificación al NUEVO email
+     * Esto garantiza que el usuario tenga acceso al nuevo email antes de cambiar
+     * @param requestEmailChangeDTO Datos de solicitud de cambio de email
+     * @return Respuesta indicando que el código fue enviado
+     */
+    AuthResponseDTO requestEmailChange(RequestEmailChangeDTO requestEmailChangeDTO);
+
+    /**
+     * Paso 2: Verifica el código y confirma el cambio de email
+     * Solo cambia el email si el código es válido
+     * @param verifyEmailChangeDTO Código de verificación
+     * @return Respuesta de confirmación de cambio
+     */
+    AuthResponseDTO verifyEmailChange(VerifyEmailChangeDTO verifyEmailChangeDTO);
 
 
     /**

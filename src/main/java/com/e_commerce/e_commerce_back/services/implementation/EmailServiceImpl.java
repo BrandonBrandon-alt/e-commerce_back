@@ -490,4 +490,153 @@ public class EmailServiceImpl implements EmailService {
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")), fromName);
     }
 
+    @Override
+    public void sendEmailChangeVerificationCode(String newEmail, String userName, String verificationCode) {
+        log.info("Enviando código de verificación de cambio de email a: {}", newEmail);
+
+        try {
+            String htmlContent = buildEmailChangeVerificationTemplate(newEmail, userName, verificationCode);
+
+            // Envío asíncrono
+            CompletableFuture.runAsync(() -> {
+                try {
+                    sendHtmlEmail(
+                            newEmail,
+                            "Verifica tu nuevo email - " + fromName,
+                            htmlContent);
+                    log.info("Código de verificación de cambio de email enviado exitosamente a: {}", newEmail);
+                } catch (Exception e) {
+                    log.error("Error enviando código de verificación a {}: {}", newEmail, e.getMessage());
+                }
+            });
+
+        } catch (Exception e) {
+            log.error("Error preparando email de verificación para {}: {}", newEmail, e.getMessage());
+            throw new RuntimeException("Error enviando código de verificación", e);
+        }
+    }
+
+    @Override
+    public void sendEmailChangeRequestNotification(String currentEmail, String newEmail) {
+        log.info("Enviando notificación de solicitud de cambio de email a: {}", currentEmail);
+
+        try {
+            String htmlContent = buildEmailChangeRequestTemplate(currentEmail, newEmail);
+
+            // Envío asíncrono
+            CompletableFuture.runAsync(() -> {
+                try {
+                    sendHtmlEmail(
+                            currentEmail,
+                            "Solicitud de cambio de email - " + fromName,
+                            htmlContent);
+                    log.info("Notificación de solicitud enviada exitosamente a: {}", currentEmail);
+                } catch (Exception e) {
+                    log.error("Error enviando notificación a {}: {}", currentEmail, e.getMessage());
+                }
+            });
+
+        } catch (Exception e) {
+            log.error("Error preparando notificación para {}: {}", currentEmail, e.getMessage());
+            throw new RuntimeException("Error enviando notificación", e);
+        }
+    }
+
+    private String buildEmailChangeVerificationTemplate(String newEmail, String userName, String verificationCode) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: #2196F3; color: white; padding: 20px; text-align: center; }
+                        .content { background: #f9f9f9; padding: 30px; }
+                        .code-box { background: #fff; border: 2px dashed #2196F3; padding: 20px; text-align: center; margin: 20px 0; }
+                        .code { font-size: 32px; font-weight: bold; color: #2196F3; letter-spacing: 5px; }
+                        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+                        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>🔐 Verifica tu nuevo email</h1>
+                        </div>
+                        <div class="content">
+                            <p>Hola <strong>%s</strong>,</p>
+                            <p>Has solicitado cambiar tu email a: <strong>%s</strong></p>
+                            <p>Para confirmar este cambio, ingresa el siguiente código de verificación:</p>
+                            <div class="code-box">
+                                <div class="code">%s</div>
+                            </div>
+                            <p><strong>Este código expira en %d minutos.</strong></p>
+                            <div class="warning">
+                                <strong>⚠️ Importante:</strong> Si no solicitaste este cambio, ignora este email. 
+                                Tu email actual permanecerá sin cambios.
+                            </div>
+                        </div>
+                        <div class="footer">
+                            <p>Este es un correo automático, por favor no respondas.</p>
+                            <p>&copy; %s - Todos los derechos reservados</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """.formatted(userName, newEmail, verificationCode, activationCodeExpiryMinutes, fromName);
+    }
+
+    private String buildEmailChangeRequestTemplate(String currentEmail, String newEmail) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: #FF9800; color: white; padding: 20px; text-align: center; }
+                        .content { background: #f9f9f9; padding: 30px; }
+                        .alert { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+                        .info-box { background: #e3f2fd; padding: 15px; margin: 20px 0; border-radius: 5px; }
+                        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>⚠️ Solicitud de cambio de email</h1>
+                        </div>
+                        <div class="content">
+                            <p>Hola,</p>
+                            <p>Se ha solicitado cambiar el email de tu cuenta.</p>
+                            <div class="info-box">
+                                <p><strong>Email actual:</strong> %s</p>
+                                <p><strong>Nuevo email solicitado:</strong> %s</p>
+                                <p><strong>Fecha:</strong> %s</p>
+                            </div>
+                            <div class="alert">
+                                <strong>⚠️ Importante:</strong>
+                                <ul>
+                                    <li>Se ha enviado un código de verificación al nuevo email</li>
+                                    <li>Tu email actual NO cambiará hasta que se verifique el código</li>
+                                    <li>Si no fuiste tú, tu cuenta está segura - el cambio no se completará</li>
+                                    <li>El código expira en %d minutos</li>
+                                </ul>
+                            </div>
+                            <p>Si no solicitaste este cambio, puedes ignorar este mensaje. Tu email permanecerá sin cambios.</p>
+                        </div>
+                        <div class="footer">
+                            <p>Este es un correo automático, por favor no respondas.</p>
+                            <p>&copy; %s - Todos los derechos reservados</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """.formatted(currentEmail, newEmail, 
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")),
+                activationCodeExpiryMinutes, fromName);
+    }
+
 }

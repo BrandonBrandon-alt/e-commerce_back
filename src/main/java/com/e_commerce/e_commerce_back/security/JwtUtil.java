@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
-import com.e_commerce.e_commerce_back.services.implementation.TokenRedisService;
+import com.e_commerce.e_commerce_back.services.implementation.TokensStatusDTO;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
@@ -21,7 +21,7 @@ import java.util.function.Function;
 public class JwtUtil {
 
     // CORRECCIÓN: Usar @Lazy para evitar dependencia circular
-    private final TokenRedisService tokenRedisService;
+    private final TokensStatusDTO tokenRedisService;
 
     @Value("${app.jwt.secret}")
     private String secret;
@@ -54,7 +54,7 @@ public class JwtUtil {
     }
 
     // Constructor con @Lazy para resolver dependencia circular
-    public JwtUtil(@Lazy TokenRedisService tokenRedisService) {
+    public JwtUtil(@Lazy TokensStatusDTO tokenRedisService) {
         this.tokenRedisService = tokenRedisService;
     }
 

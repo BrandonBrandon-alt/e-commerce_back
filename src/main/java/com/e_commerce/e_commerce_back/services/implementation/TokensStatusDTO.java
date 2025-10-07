@@ -20,13 +20,13 @@ import java.util.concurrent.TimeUnit;
  */
 @Service
 @Slf4j
-public class TokenRedisService {
+public class TokensStatusDTO {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final JwtUtil jwtUtil;
 
     // Constructor con @Qualifier para especificar el bean correcto
-    public TokenRedisService(
+    public TokensStatusDTO(
             @Qualifier("customStringRedisTemplate") RedisTemplate<String, String> redisTemplate,
             JwtUtil jwtUtil) {
         this.redisTemplate = redisTemplate;

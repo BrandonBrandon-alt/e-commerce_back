@@ -72,6 +72,19 @@ public interface EmailService {
      */
     void sendAccountUnlockedEmail(User user);
 
+    /**
+     * Envía código de verificación al NUEVO email para confirmar cambio
+     * Este es el método seguro que envía al nuevo email antes de cambiar
+     * @param newEmail Email al que se quiere cambiar
+     * @param userName Nombre del usuario
+     * @param verificationCode Código de 6 dígitos
+     */
+    void sendEmailChangeVerificationCode(String newEmail, String userName, String verificationCode);
 
-    
+    /**
+     * Notifica al email ACTUAL que se solicitó un cambio de email
+     * @param currentEmail Email actual del usuario
+     * @param newEmail Nuevo email solicitado
+     */
+    void sendEmailChangeRequestNotification(String currentEmail, String newEmail);
 }

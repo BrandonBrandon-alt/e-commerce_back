@@ -93,10 +93,13 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
 
-    @Column(name = "failed_login_attempts", nullable = false)
-    @Builder.Default
-    private Integer failedLoginAttempts = 0;
-
+    /**
+     * @deprecated Este campo ya no se usa. El bloqueo de cuentas ahora se maneja en
+     *             Redis.
+     *             Mantenido temporalmente para compatibilidad con datos existentes.
+     *             Será eliminado en una versión futura.
+     */
+    @Deprecated
     @Column(name = "account_locked_until")
     private LocalDateTime accountLockedUntil;
 
@@ -228,23 +231,37 @@ public class User extends BaseAuditableEntity implements UserDetails {
         return status == EnumStatus.INACTIVE;
     }
 
+    /**
+     * @deprecated El bloqueo de cuentas ahora se maneja en Redis mediante
+     *             AccountLockoutRedisService.
+     *             Este método se mantiene solo para compatibilidad con código
+     *             legacy.
+     */
+    @Deprecated
     public boolean isAccountTemporarilyLocked() {
         return accountLockedUntil != null &&
                 accountLockedUntil.isAfter(LocalDateTime.now());
     }
 
     // Security methods
-    public void incrementFailedLoginAttempts() {
-        this.failedLoginAttempts = Objects.requireNonNullElse(this.failedLoginAttempts, 0) + 1;
-    }
 
-    public void resetFailedLoginAttempts() {
-        this.failedLoginAttempts = 0;
-        this.accountLockedUntil = null;
-    }
-
+    /**
+     * @deprecated El bloqueo de cuentas ahora se maneja en Redis mediante
+     *             AccountLockoutRedisService.
+     *             Este método se mantiene solo para compatibilidad con código
+     *             legacy.
+     */
+    @Deprecated
     public void lockAccount(int minutesToLock) {
         this.accountLockedUntil = LocalDateTime.now().plusMinutes(minutesToLock);
+    }
+
+    /**
+     * Resetea el bloqueo de cuenta (solo limpia datos legacy de BD).
+     * El bloqueo real ahora se maneja en Redis.
+     */
+    public void resetAccountLock() {
+        this.accountLockedUntil = null;
     }
 
     public void markPhoneAsVerified() {
@@ -267,9 +284,6 @@ public class User extends BaseAuditableEntity implements UserDetails {
         }
         if (role == null) {
             role = EnumRole.USER;
-        }
-        if (failedLoginAttempts == null) {
-            failedLoginAttempts = 0;
         }
         if (emailVerified == null) {
             emailVerified = false;

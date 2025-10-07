@@ -45,7 +45,18 @@ public class UserInfoDTO {
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
     
+    /**
+     * @deprecated Este campo ya no se usa. Los intentos fallidos ahora se manejan en Redis.
+     * Se mantiene por compatibilidad pero siempre retorna null.
+     */
+    @Deprecated
     private Integer failedLoginAttempts;
+    
+    /**
+     * @deprecated Este campo ya no se usa. El bloqueo ahora se maneja en Redis.
+     * Se mantiene por compatibilidad pero siempre retorna false.
+     */
+    @Deprecated
     private Boolean accountTemporarilyLocked;
     
     // Factory method principal - información completa
@@ -70,8 +81,9 @@ public class UserInfoDTO {
                 .credentialsNonExpired(user.isCredentialsNonExpired())
                 .enabled(user.isEnabled())
                 .createdAt(user.getCreatedAt())
-                .failedLoginAttempts(user.getFailedLoginAttempts())
-                .accountTemporarilyLocked(user.isAccountTemporarilyLocked())
+                // Campos deprecados - siempre null/false (datos ahora en Redis)
+                .failedLoginAttempts(null)
+                .accountTemporarilyLocked(false)
                 .build();
     }
     
