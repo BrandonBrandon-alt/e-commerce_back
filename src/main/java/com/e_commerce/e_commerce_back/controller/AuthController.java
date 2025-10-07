@@ -26,29 +26,9 @@ public class AuthController {
 
     private final AuthService authService;
 
-    /**
-     * Endpoint para login de usuarios
-     */
-    @PostMapping("/login")
-    @Operation(summary = "Iniciar sesión", description = "Autentica un usuario y devuelve un token JWT")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Login exitoso"),
-            @ApiResponse(responseCode = "401", description = "Credenciales inválidas"),
-            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos")
-    })
-    public ResponseEntity<AuthResponseDTO> login(@Valid @RequestBody LoginDTO loginDTO) {
-        log.info("Intento de login para email: {}", loginDTO.email());
-
-        try {
-            AuthResponseDTO response = authService.login(loginDTO);
-            log.info("Login exitoso para email: {}", loginDTO.email());
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error en login para email: {}, error: {}", loginDTO.email(), e.getMessage());
-            throw e;
-        }
-    }
+    // ============================================================================
+    // REGISTRO Y ACTIVACIÓN
+    // ============================================================================
 
     /**
      * Endpoint para registro de usuarios
@@ -70,72 +50,6 @@ public class AuthController {
 
         } catch (Exception e) {
             log.error("Error en registro para email: {}, error: {}", createUserDTO.email(), e.getMessage());
-            throw e;
-        }
-    }
-
-    /**
-     * Endpoint para validar token JWT
-     */
-    @PostMapping("/validate-token")
-    @Operation(summary = "Validar token", description = "Valida si un token JWT es válido y activo")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Token válido"),
-            @ApiResponse(responseCode = "401", description = "Token inválido o expirado")
-    })
-    public ResponseEntity<TokenValidationDTO> validateToken(@RequestHeader("Authorization") String authHeader) {
-        log.debug("Validando token JWT");
-
-        try {
-            TokenValidationDTO response = authService.validateToken(authHeader);
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error validando token: {}", e.getMessage());
-            throw e;
-        }
-    }
-
-    /**
-     * Endpoint para obtener información del usuario autenticado
-     */
-    @GetMapping("/me")
-    @Operation(summary = "Información del usuario", description = "Obtiene información del usuario autenticado")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Información obtenida exitosamente"),
-            @ApiResponse(responseCode = "401", description = "No autenticado")
-    })
-    public ResponseEntity<UserInfoDTO> getCurrentUser() {
-        log.debug("Obteniendo información del usuario autenticado");
-
-        try {
-            UserInfoDTO userInfo = authService.getCurrentUserInfo();
-            return ResponseEntity.ok(userInfo);
-
-        } catch (Exception e) {
-            log.error("Error obteniendo información del usuario: {}", e.getMessage());
-            throw e;
-        }
-    }
-
-    /**
-     * Endpoint para logout (invalidar token)
-     */
-    @PostMapping("/logout")
-    @Operation(summary = "Cerrar sesión", description = "Invalida el token JWT actual")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Logout exitoso"),
-            @ApiResponse(responseCode = "401", description = "No autenticado")
-    })
-    public ResponseEntity<String> logout(@RequestHeader("Authorization") String authHeader) {
-        log.info("Cerrando sesión");
-
-        try {
-            authService.logout(authHeader);
-            return ResponseEntity.ok("Sesión cerrada exitosamente");
-
-        } catch (Exception e) {
-            log.error("Error en logout: {}", e.getMessage());
             throw e;
         }
     }
@@ -189,150 +103,59 @@ public class AuthController {
         }
     }
 
+    // ============================================================================
+    // LOGIN Y LOGOUT
+    // ============================================================================
+
     /**
-     * Endpoint para solicitar reseteo de contraseña
+     * Endpoint para login de usuarios
      */
-    @PostMapping("/forgot-password")
-    @Operation(summary = "Olvidé mi contraseña", description = "Envía un código de reseteo de contraseña al email del usuario")
+    @PostMapping("/login")
+    @Operation(summary = "Iniciar sesión", description = "Autentica un usuario y devuelve un token JWT")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Código de reseteo enviado"),
-            @ApiResponse(responseCode = "400", description = "Datos inválidos")
+            @ApiResponse(responseCode = "200", description = "Login exitoso"),
+            @ApiResponse(responseCode = "401", description = "Credenciales inválidas"),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos")
     })
-    public ResponseEntity<AuthResponseDTO> forgotPassword(@Valid @RequestBody ForgotPasswordDTO forgotPasswordDTO) {
-        log.info("Solicitud de reseteo de contraseña para email: {}", forgotPasswordDTO.email());
+    public ResponseEntity<AuthResponseDTO> login(@Valid @RequestBody LoginDTO loginDTO) {
+        log.info("Intento de login para email: {}", loginDTO.email());
 
         try {
-            AuthResponseDTO response = authService.forgotPassword(forgotPasswordDTO);
-            log.info("Solicitud de reseteo procesada para email: {}", forgotPasswordDTO.email());
+            AuthResponseDTO response = authService.login(loginDTO);
+            log.info("Login exitoso para email: {}", loginDTO.email());
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            log.error("Error en solicitud de reseteo para email: {}, error: {}",
-                    forgotPasswordDTO.email(), e.getMessage());
+            log.error("Error en login para email: {}, error: {}", loginDTO.email(), e.getMessage());
             throw e;
         }
     }
 
     /**
-     * Endpoint para resetear contraseña con código
+     * Endpoint para logout (invalidar token)
      */
-    @PostMapping("/reset-password")
-    @Operation(summary = "Resetear contraseña", description = "Resetea la contraseña usando el código de verificación")
+    @PostMapping("/logout")
+    @Operation(summary = "Cerrar sesión", description = "Invalida el token JWT actual")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Contraseña reseteada exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Código inválido o contraseñas no coinciden"),
-            @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
-    })
-    public ResponseEntity<AuthResponseDTO> resetPassword(@Valid @RequestBody ResetPasswordDTO resetPasswordDTO) {
-        log.info("Intento de reseteo de contraseña con código");
-
-        try {
-            AuthResponseDTO response = authService.resetPassword(resetPasswordDTO);
-            log.info("Reseteo de contraseña procesado exitosamente");
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error en reseteo de contraseña: {}", e.getMessage());
-            throw e;
-        }
-    }
-
-    /**
-     * Endpoint para refrescar token JWT
-     */
-    @PostMapping("/refresh-token")
-    @Operation(summary = "Refrescar token", description = "Genera un nuevo access token usando el refresh token")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Token refrescado exitosamente"),
-            @ApiResponse(responseCode = "401", description = "Refresh token inválido o expirado")
-    })
-    public ResponseEntity<AuthResponseDTO> refreshToken(@Valid @RequestBody RefreshTokenDTO refreshTokenDTO) {
-        log.info("Solicitud de refresh token");
-
-        try {
-            AuthResponseDTO response = authService.refreshToken(refreshTokenDTO);
-            log.info("Token refrescado exitosamente");
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error refrescando token: {}", e.getMessage());
-            throw e;
-        }
-    }
-
-    /**
-     * Endpoint para cambiar contraseña (usuario autenticado)
-     */
-    @PutMapping("/change-password")
-    @Operation(summary = "Cambiar contraseña", description = "Cambia la contraseña del usuario autenticado")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Contraseña cambiada exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Contraseña actual incorrecta o contraseñas no coinciden"),
+            @ApiResponse(responseCode = "200", description = "Logout exitoso"),
             @ApiResponse(responseCode = "401", description = "No autenticado")
     })
-    public ResponseEntity<AuthResponseDTO> changePassword(@Valid @RequestBody ChangePasswordDTO changePasswordDTO) {
-        log.info("Solicitud de cambio de contraseña");
+    public ResponseEntity<String> logout(@RequestHeader("Authorization") String authHeader) {
+        log.info("Cerrando sesión");
 
         try {
-            AuthResponseDTO response = authService.changePassword(changePasswordDTO);
-            log.info("Contraseña cambiada exitosamente");
-            return ResponseEntity.ok(response);
+            authService.logout(authHeader);
+            return ResponseEntity.ok("Sesión cerrada exitosamente");
 
         } catch (Exception e) {
-            log.error("Error cambiando contraseña: {}", e.getMessage());
+            log.error("Error en logout: {}", e.getMessage());
             throw e;
         }
     }
 
-    /**
-     * Endpoint para cambiar email (usuario autenticado)
-     */
-    @PutMapping("/change-email")
-    @Operation(summary = "Cambiar email", description = "Cambia el email del usuario autenticado")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Email cambiado exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Emails no coinciden o contraseña incorrecta"),
-            @ApiResponse(responseCode = "401", description = "No autenticado"),
-            @ApiResponse(responseCode = "409", description = "Email ya existe")
-    })
-    public ResponseEntity<AuthResponseDTO> changeEmail(@Valid @RequestBody ChangeEmailDTO changeEmailDTO) {
-        log.info("Solicitud de cambio de email");
-
-        try {
-            AuthResponseDTO response = authService.changeEmail(changeEmailDTO);
-            log.info("Email cambiado exitosamente");
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error cambiando email: {}", e.getMessage());
-            throw e;
-        }
-    }
-
-    /**
-     * Endpoint para actualizar información del perfil
-     */
-    @PutMapping("/update-profile")
-    @Operation(summary = "Actualizar perfil", description = "Actualiza la información del perfil del usuario autenticado")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Perfil actualizado exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
-            @ApiResponse(responseCode = "401", description = "No autenticado")
-    })
-    public ResponseEntity<AuthResponseDTO> updateProfile(
-            @Valid @RequestBody UpdateUserProfileDTO updateUserProfileDTO) {
-        log.info("Solicitud de actualización de perfil");
-
-        try {
-            AuthResponseDTO response = authService.updateUserInfo(updateUserProfileDTO);
-            log.info("Perfil actualizado exitosamente");
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error actualizando perfil: {}", e.getMessage());
-            throw e;
-        }
-    }
+    // ============================================================================
+    // DESBLOQUEO DE CUENTA
+    // ============================================================================
 
     /**
      * Endpoint para solicitar desbloqueo inmediato de cuenta
@@ -383,4 +206,210 @@ public class AuthController {
             throw e;
         }
     }
+
+    // ============================================================================
+    // RECUPERACIÓN DE CONTRASEÑA
+    // ============================================================================
+
+    /**
+     * Endpoint para solicitar reseteo de contraseña
+     */
+    @PostMapping("/forgot-password")
+    @Operation(summary = "Olvidé mi contraseña", description = "Envía un código de reseteo de contraseña al email del usuario")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Código de reseteo enviado"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos")
+    })
+    public ResponseEntity<AuthResponseDTO> forgotPassword(@Valid @RequestBody ForgotPasswordDTO forgotPasswordDTO) {
+        log.info("Solicitud de reseteo de contraseña para email: {}", forgotPasswordDTO.email());
+
+        try {
+            AuthResponseDTO response = authService.forgotPassword(forgotPasswordDTO);
+            log.info("Solicitud de reseteo procesada para email: {}", forgotPasswordDTO.email());
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error en solicitud de reseteo para email: {}, error: {}",
+                    forgotPasswordDTO.email(), e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para resetear contraseña con código
+     */
+    @PostMapping("/reset-password")
+    @Operation(summary = "Resetear contraseña", description = "Resetea la contraseña usando el código de verificación")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Contraseña reseteada exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Código inválido o contraseñas no coinciden"),
+            @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
+    })
+    public ResponseEntity<AuthResponseDTO> resetPassword(@Valid @RequestBody ResetPasswordDTO resetPasswordDTO) {
+        log.info("Intento de reseteo de contraseña con código");
+
+        try {
+            AuthResponseDTO response = authService.resetPassword(resetPasswordDTO);
+            log.info("Reseteo de contraseña procesado exitosamente");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error en reseteo de contraseña: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    // ============================================================================
+    // GESTIÓN DE CONTRASEÑA Y EMAIL
+    // ============================================================================
+
+    /**
+     * Endpoint para cambiar contraseña (usuario autenticado)
+     */
+    @PutMapping("/change-password")
+    @Operation(summary = "Cambiar contraseña", description = "Cambia la contraseña del usuario autenticado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Contraseña cambiada exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Contraseña actual incorrecta o contraseñas no coinciden"),
+            @ApiResponse(responseCode = "401", description = "No autenticado")
+    })
+    public ResponseEntity<AuthResponseDTO> changePassword(@Valid @RequestBody ChangePasswordDTO changePasswordDTO) {
+        log.info("Solicitud de cambio de contraseña");
+
+        try {
+            AuthResponseDTO response = authService.changePassword(changePasswordDTO);
+            log.info("Contraseña cambiada exitosamente");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error cambiando contraseña: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para cambiar email (usuario autenticado)
+     */
+    @PutMapping("/change-email")
+    @Operation(summary = "Cambiar email", description = "Cambia el email del usuario autenticado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Email cambiado exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Emails no coinciden o contraseña incorrecta"),
+            @ApiResponse(responseCode = "401", description = "No autenticado"),
+            @ApiResponse(responseCode = "409", description = "Email ya existe")
+    })
+    public ResponseEntity<AuthResponseDTO> changeEmail(@Valid @RequestBody ChangeEmailDTO changeEmailDTO) {
+        log.info("Solicitud de cambio de email");
+
+        try {
+            AuthResponseDTO response = authService.changeEmail(changeEmailDTO);
+            log.info("Email cambiado exitosamente");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error cambiando email: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    // ============================================================================
+    // GESTIÓN DE PERFIL
+    // ============================================================================
+
+    /**
+     * Endpoint para actualizar información del perfil
+     */
+    @PutMapping("/update-profile")
+    @Operation(summary = "Actualizar perfil", description = "Actualiza la información del perfil del usuario autenticado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Perfil actualizado exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "401", description = "No autenticado")
+    })
+    public ResponseEntity<AuthResponseDTO> updateProfile(
+            @Valid @RequestBody UpdateUserProfileDTO updateUserProfileDTO) {
+        log.info("Solicitud de actualización de perfil");
+
+        try {
+            AuthResponseDTO response = authService.updateUserInfo(updateUserProfileDTO);
+            log.info("Perfil actualizado exitosamente");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error actualizando perfil: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para obtener información del usuario autenticado
+     */
+    @GetMapping("/me")
+    @Operation(summary = "Información del usuario", description = "Obtiene información del usuario autenticado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Información obtenida exitosamente"),
+            @ApiResponse(responseCode = "401", description = "No autenticado")
+    })
+    public ResponseEntity<UserInfoDTO> getCurrentUser() {
+        log.debug("Obteniendo información del usuario autenticado");
+
+        try {
+            UserInfoDTO userInfo = authService.getCurrentUserInfo();
+            return ResponseEntity.ok(userInfo);
+
+        } catch (Exception e) {
+            log.error("Error obteniendo información del usuario: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    // ============================================================================
+    // VALIDACIÓN Y REFRESH DE TOKENS
+    // ============================================================================
+
+    /**
+     * Endpoint para validar token JWT
+     */
+    @PostMapping("/validate-token")
+    @Operation(summary = "Validar token", description = "Valida si un token JWT es válido y activo")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Token válido"),
+            @ApiResponse(responseCode = "401", description = "Token inválido o expirado")
+    })
+    public ResponseEntity<TokenValidationDTO> validateToken(@RequestHeader("Authorization") String authHeader) {
+        log.debug("Validando token JWT");
+
+        try {
+            TokenValidationDTO response = authService.validateToken(authHeader);
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error validando token: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Endpoint para refrescar token JWT
+     */
+    @PostMapping("/refresh-token")
+    @Operation(summary = "Refrescar token", description = "Genera un nuevo access token usando el refresh token")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Token refrescado exitosamente"),
+            @ApiResponse(responseCode = "401", description = "Refresh token inválido o expirado")
+    })
+    public ResponseEntity<AuthResponseDTO> refreshToken(@Valid @RequestBody RefreshTokenDTO refreshTokenDTO) {
+        log.info("Solicitud de refresh token");
+
+        try {
+            AuthResponseDTO response = authService.refreshToken(refreshTokenDTO);
+            log.info("Token refrescado exitosamente");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error refrescando token: {}", e.getMessage());
+            throw e;
+        }
+    }
+
 }

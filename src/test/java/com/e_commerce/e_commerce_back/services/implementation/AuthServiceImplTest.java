@@ -5,6 +5,9 @@ import com.e_commerce.e_commerce_back.dto.ForgotPasswordDTO;
 import com.e_commerce.e_commerce_back.dto.ActivateAccountDTO;
 import com.e_commerce.e_commerce_back.dto.RegisterUserDTO;
 import com.e_commerce.e_commerce_back.dto.TokenValidationDTO;
+import com.e_commerce.e_commerce_back.dto.LoginDTO;
+import com.e_commerce.e_commerce_back.dto.RequestImmediateUnlockDTO;
+import com.e_commerce.e_commerce_back.dto.VerifyUnlockCodeDTO;
 import com.e_commerce.e_commerce_back.entity.User;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
@@ -20,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -52,6 +56,8 @@ class AuthServiceImplTest {
     TokenRedisService tokenRedisService;
     @Mock
     JwtSessionService jwtSessionService;
+    @Mock
+    AccountLockoutRedisService accountLockoutRedisService;
 
     @InjectMocks
     AuthServiceImpl authService;
@@ -515,6 +521,221 @@ class AuthServiceImplTest {
         verify(tokenRedisService).canRequestToken(user.getId(), "reset");
         verify(tokenRedisService).generateAndStoreResetCode(user.getId());
         verify(emailService).sendPasswordResetEmail(user, resetCode);
+    }
+
+    // ============================================================================
+    // TESTS DE BLOQUEO DE CUENTA
+    // ============================================================================
+
+    @Test
+    void accountLockout_blocksAccountAfterMaxFailedAttempts() {
+        // Given
+        User user = createTestUser();
+        user.setStatus(EnumStatus.ACTIVE);
+        user.setEmailVerified(true);
+
+        LoginDTO loginDTO = new LoginDTO("user@test.com", "wrongPassword");
+
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(false);
+        when(authenticationManager.authenticate(any())).thenThrow(new BadCredentialsException("Invalid credentials"));
+        when(accountLockoutRedisService.recordFailedAttempt(user.getId())).thenReturn(5);
+        when(accountLockoutRedisService.getRemainingAttempts(user.getId())).thenReturn(0);
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(true);
+
+        // When & Then
+        BadCredentialsException exception = assertThrows(BadCredentialsException.class, () -> {
+            authService.login(loginDTO);
+        });
+
+        assertTrue(exception.getMessage().contains("bloqueada"));
+        verify(accountLockoutRedisService).recordFailedAttempt(user.getId());
+        verify(accountLockoutRedisService, atLeastOnce()).isAccountLocked(user.getId());
+    }
+
+    @Test
+    void accountLockout_preventsLoginWhenAccountIsLocked() {
+        // Given
+        User user = createTestUser();
+        user.setStatus(EnumStatus.ACTIVE);
+        user.setEmailVerified(true);
+
+        LoginDTO loginDTO = new LoginDTO("user@test.com", "correctPassword");
+        java.time.Duration remainingTime = java.time.Duration.ofMinutes(10);
+
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(true);
+        when(accountLockoutRedisService.getRemainingLockoutTime(user.getId())).thenReturn(remainingTime);
+
+        // When & Then
+        BadCredentialsException exception = assertThrows(BadCredentialsException.class, () -> {
+            authService.login(loginDTO);
+        });
+
+        assertTrue(exception.getMessage().contains("bloqueada"));
+        assertTrue(exception.getMessage().contains("10 minutos"));
+        verify(accountLockoutRedisService).isAccountLocked(user.getId());
+        verify(accountLockoutRedisService).getRemainingLockoutTime(user.getId());
+        verify(authenticationManager, never()).authenticate(any());
+    }
+
+    @Test
+    void accountLockout_resetsFailedAttemptsAfterSuccessfulLogin() {
+        // Given
+        User user = createTestUser();
+        user.setStatus(EnumStatus.ACTIVE);
+        user.setEmailVerified(true);
+
+        LoginDTO loginDTO = new LoginDTO("user@test.com", "correctPassword");
+        Authentication authentication = mock(Authentication.class);
+
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(false);
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(jwtSessionService.createSession(any(), any(), any(), any()))
+                .thenReturn(JwtSessionService.SessionTokens.builder()
+                        .accessToken("access-token")
+                        .refreshToken("refresh-token")
+                        .expiresIn(3600L)
+                        .build());
+
+        // When
+        AuthResponseDTO result = authService.login(loginDTO);
+
+        // Then
+        assertNotNull(result);
+        verify(accountLockoutRedisService).resetFailedAttempts(user.getId());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void accountLockout_showsRemainingAttemptsOnFailedLogin() {
+        // Given
+        User user = createTestUser();
+        user.setStatus(EnumStatus.ACTIVE);
+        user.setEmailVerified(true);
+
+        LoginDTO loginDTO = new LoginDTO("user@test.com", "wrongPassword");
+
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(false);
+        when(authenticationManager.authenticate(any())).thenThrow(new BadCredentialsException("Invalid credentials"));
+        when(accountLockoutRedisService.recordFailedAttempt(user.getId())).thenReturn(3);
+        when(accountLockoutRedisService.getRemainingAttempts(user.getId())).thenReturn(2);
+
+        // When & Then
+        BadCredentialsException exception = assertThrows(BadCredentialsException.class, () -> {
+            authService.login(loginDTO);
+        });
+
+        assertTrue(exception.getMessage().contains("Intentos restantes: 2"));
+        verify(accountLockoutRedisService).recordFailedAttempt(user.getId());
+        verify(accountLockoutRedisService).getRemainingAttempts(user.getId());
+    }
+
+    @Test
+    void accountLockout_requestImmediateUnlock_sendsCodeWhenAccountIsLocked() {
+        // Given
+        RequestImmediateUnlockDTO dto = new RequestImmediateUnlockDTO("user@test.com");
+        User user = createTestUser();
+        String unlockCode = "123456";
+
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(true);
+        when(tokenRedisService.canRequestToken(user.getId(), "unlock")).thenReturn(true);
+        when(tokenRedisService.generateAndStoreUnlockCode(user.getId())).thenReturn(unlockCode);
+        doNothing().when(emailService).sendUnlockCode(user, unlockCode);
+
+        // When
+        AuthResponseDTO result = authService.requestImmediateUnlock(dto);
+
+        // Then
+        assertNotNull(result);
+        assertEquals("Código de desbloqueo enviado a tu email", result.getMessage());
+        verify(accountLockoutRedisService).isAccountLocked(user.getId());
+        verify(tokenRedisService).generateAndStoreUnlockCode(user.getId());
+        verify(emailService).sendUnlockCode(user, unlockCode);
+    }
+
+    @Test
+    void accountLockout_requestImmediateUnlock_returnsSuccessWhenAccountNotLocked() {
+        // Given
+        RequestImmediateUnlockDTO dto = new RequestImmediateUnlockDTO("user@test.com");
+        User user = createTestUser();
+
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(false);
+
+        // When
+        AuthResponseDTO result = authService.requestImmediateUnlock(dto);
+
+        // Then
+        assertNotNull(result);
+        assertEquals("Si el correo es válido y está bloqueado, recibirás un código", result.getMessage());
+        verify(accountLockoutRedisService).isAccountLocked(user.getId());
+        verify(tokenRedisService, never()).generateAndStoreUnlockCode(any());
+        verify(emailService, never()).sendUnlockCode(any(), any());
+    }
+
+    @Test
+    void accountLockout_verifyUnlockCode_unlocksAccountSuccessfully() {
+        // Given
+        VerifyUnlockCodeDTO dto = new VerifyUnlockCodeDTO("123456");
+        User user = createTestUser();
+
+        when(tokenRedisService.verifyAndConsumeUnlockCode("123456")).thenReturn(user.getId());
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(true);
+        doNothing().when(accountLockoutRedisService).unlockAccount(user.getId());
+        doNothing().when(emailService).sendAccountUnlockedEmail(user);
+
+        // When
+        AuthResponseDTO result = authService.verifyUnlockCode(dto);
+
+        // Then
+        assertNotNull(result);
+        assertEquals("Cuenta desbloqueada exitosamente. Ya puedes iniciar sesión.", result.getMessage());
+        verify(tokenRedisService).verifyAndConsumeUnlockCode("123456");
+        verify(accountLockoutRedisService).isAccountLocked(user.getId());
+        verify(accountLockoutRedisService).unlockAccount(user.getId());
+        verify(emailService).sendAccountUnlockedEmail(user);
+    }
+
+    @Test
+    void accountLockout_verifyUnlockCode_returnsErrorWhenCodeIsInvalid() {
+        // Given
+        VerifyUnlockCodeDTO dto = new VerifyUnlockCodeDTO("invalid-code");
+
+        when(tokenRedisService.verifyAndConsumeUnlockCode("invalid-code")).thenReturn(null);
+
+        // When
+        AuthResponseDTO result = authService.verifyUnlockCode(dto);
+
+        // Then
+        assertNotNull(result);
+        assertEquals("Código de desbloqueo incorrecto o expirado", result.getMessage());
+        verify(tokenRedisService).verifyAndConsumeUnlockCode("invalid-code");
+        verify(accountLockoutRedisService, never()).unlockAccount(any());
+    }
+
+    @Test
+    void accountLockout_verifyUnlockCode_returnsSuccessWhenAccountAlreadyUnlocked() {
+        // Given
+        VerifyUnlockCodeDTO dto = new VerifyUnlockCodeDTO("123456");
+        User user = createTestUser();
+
+        when(tokenRedisService.verifyAndConsumeUnlockCode("123456")).thenReturn(user.getId());
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(accountLockoutRedisService.isAccountLocked(user.getId())).thenReturn(false);
+
+        // When
+        AuthResponseDTO result = authService.verifyUnlockCode(dto);
+
+        // Then
+        assertNotNull(result);
+        assertEquals("La cuenta ya está desbloqueada", result.getMessage());
+        verify(accountLockoutRedisService).isAccountLocked(user.getId());
+        verify(accountLockoutRedisService, never()).unlockAccount(any());
     }
 
 }

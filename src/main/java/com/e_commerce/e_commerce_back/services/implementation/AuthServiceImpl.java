@@ -278,7 +278,7 @@ public class AuthServiceImpl implements AuthService {
         try {
             String token = extractTokenFromHeader(authHeader);
 
-            if (token != null) {
+            if (StringUtils.hasText(token)) {
                 try {
                     String sessionId = jwtSessionService.findSessionIdByAccessToken(token);
 
@@ -546,7 +546,7 @@ public class AuthServiceImpl implements AuthService {
 
             user.setPassword(passwordEncoder.encode(resetPasswordDTO.password()));
             user.setPasswordChangedAt(LocalDateTime.now());
-            
+
             // Limpiar bloqueo legacy si existe
             if (user.getAccountLockedUntil() != null) {
                 user.resetAccountLock();
@@ -621,7 +621,7 @@ public class AuthServiceImpl implements AuthService {
 
             user.setPassword(passwordEncoder.encode(changePasswordDTO.newPassword()));
             user.setPasswordChangedAt(LocalDateTime.now());
-            
+
             // Limpiar bloqueo legacy si existe
             if (user.getAccountLockedUntil() != null) {
                 user.resetAccountLock();
@@ -658,26 +658,27 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * @deprecated Usar requestEmailChange() y verifyEmailChange() en su lugar
-     * Este método cambia el email inmediatamente sin verificar acceso al nuevo email (INSEGURO)
+     *             Este método cambia el email inmediatamente sin verificar acceso
+     *             al nuevo email (INSEGURO)
      */
     @Deprecated
     @Override
     @Transactional
     public AuthResponseDTO changeEmail(ChangeEmailDTO changeEmailDTO) {
         log.warn("DEPRECADO: Usar requestEmailChange() + verifyEmailChange() para mayor seguridad");
-        
+
         // Redirigir al nuevo flujo seguro
         RequestEmailChangeDTO request = new RequestEmailChangeDTO(
-            changeEmailDTO.newEmail(),
-            changeEmailDTO.newEmailConfirmation(),
-            changeEmailDTO.currentPassword()
-        );
-        
+                changeEmailDTO.newEmail(),
+                changeEmailDTO.newEmailConfirmation(),
+                changeEmailDTO.currentPassword());
+
         return requestEmailChange(request);
     }
 
     /**
-     * Paso 1: Solicita cambio de email y envía código de verificación al NUEVO email
+     * Paso 1: Solicita cambio de email y envía código de verificación al NUEVO
+     * email
      * Esto garantiza que el usuario tenga acceso al nuevo email antes de cambiar
      */
     @Override
@@ -722,12 +723,12 @@ public class AuthServiceImpl implements AuthService {
 
             // Generar código y enviarlo al NUEVO email (no al actual)
             String verificationCode = tokenRedisService.generateAndStoreEmailChangeCode(user.getId(), newEmail);
-            
+
             try {
                 // IMPORTANTE: Enviar al NUEVO email para verificar que el usuario tiene acceso
                 emailService.sendEmailChangeVerificationCode(newEmail, user.getName(), verificationCode);
-                log.info("Código de verificación enviado al NUEVO email: {} para usuario: {}", 
-                    newEmail, currentEmail);
+                log.info("Código de verificación enviado al NUEVO email: {} para usuario: {}",
+                        newEmail, currentEmail);
             } catch (Exception e) {
                 log.error("Error enviando código de verificación al nuevo email: {}", e.getMessage());
                 tokenRedisService.cancelEmailChange(user.getId());
@@ -742,8 +743,8 @@ public class AuthServiceImpl implements AuthService {
             }
 
             return AuthResponseDTO.success(
-                    "Código de verificación enviado a " + maskEmail(newEmail) + 
-                    ". Verifica tu nuevo email e ingresa el código para confirmar el cambio.");
+                    "Código de verificación enviado a " + maskEmail(newEmail) +
+                            ". Verifica tu nuevo email e ingresa el código para confirmar el cambio.");
 
         } catch (UsernameNotFoundException e) {
             log.error("Usuario no encontrado al solicitar cambio de email: {}", e.getMessage());
@@ -775,9 +776,8 @@ public class AuthServiceImpl implements AuthService {
 
             // Verificar y consumir código
             String newEmail = tokenRedisService.verifyAndConsumeEmailChangeCode(
-                user.getId(), 
-                verifyEmailChangeDTO.verificationCode()
-            );
+                    user.getId(),
+                    verifyEmailChangeDTO.verificationCode());
 
             if (newEmail == null) {
                 log.warn("Código de cambio de email inválido o expirado para usuario: {}", currentEmail);
@@ -816,8 +816,8 @@ public class AuthServiceImpl implements AuthService {
             }
 
             return AuthResponseDTO.success(
-                    "Email cambiado exitosamente a " + newEmail + 
-                    ". Por seguridad, todas tus sesiones han sido cerradas. Inicia sesión nuevamente.");
+                    "Email cambiado exitosamente a " + newEmail +
+                            ". Por seguridad, todas tus sesiones han sido cerradas. Inicia sesión nuevamente.");
 
         } catch (UsernameNotFoundException e) {
             log.error("Usuario no encontrado al verificar cambio de email: {}", e.getMessage());
@@ -836,15 +836,15 @@ public class AuthServiceImpl implements AuthService {
         if (email == null || !email.contains("@")) {
             return email;
         }
-        
+
         String[] parts = email.split("@");
         String localPart = parts[0];
         String domain = parts[1];
-        
+
         if (localPart.length() <= 2) {
             return localPart.charAt(0) + "*@" + domain;
         }
-        
+
         return localPart.charAt(0) + "*****@" + domain;
     }
 
