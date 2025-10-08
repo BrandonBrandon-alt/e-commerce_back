@@ -312,6 +312,28 @@ public class AuthController {
         }
     }
 
+    @PostMapping("/verify-email-change")
+    @Operation(summary = "Verificar cambio de email", description = "Verifica el cambio de email del usuario autenticado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Email verificado exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Código de verificación incorrecto o expirado"),
+            @ApiResponse(responseCode = "401", description = "No autenticado"),
+            @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
+    })
+    public ResponseEntity<AuthResponseDTO> verifyEmailChange(@Valid @RequestBody VerifyEmailChangeDTO verifyEmailChangeDTO) {
+        log.info("Solicitud de verificación de cambio de email");
+
+        try {
+            AuthResponseDTO response = authService.verifyEmailChange(verifyEmailChangeDTO);
+            log.info("Email verificado exitosamente");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error verificando cambio de email: {}", e.getMessage());
+            throw e;
+        }
+    }
+
     // ============================================================================
     // GESTIÓN DE PERFIL
     // ============================================================================

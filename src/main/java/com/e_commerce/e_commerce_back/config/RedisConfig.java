@@ -47,6 +47,10 @@ public class RedisConfig {
     @Value("${spring.data.redis.lettuce.pool.min-idle:2}")
     private int minIdle;
 
+    /**
+     * configuracion del servicio de Redis
+     * @return
+     */
     @Bean
     public LettuceConnectionFactory redisConnectionFactory() {
         log.info("Configurando conexión Redis: {}:{} database:{}", redisHost, redisPort, redisDatabase);
