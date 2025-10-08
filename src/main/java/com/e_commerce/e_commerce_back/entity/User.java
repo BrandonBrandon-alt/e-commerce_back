@@ -93,16 +93,6 @@ public class User extends BaseAuditableEntity implements UserDetails {
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
 
-    /**
-     * @deprecated Este campo ya no se usa. El bloqueo de cuentas ahora se maneja en
-     *             Redis.
-     *             Mantenido temporalmente para compatibilidad con datos existentes.
-     *             Será eliminado en una versión futura.
-     */
-    @Deprecated
-    @Column(name = "account_locked_until")
-    private LocalDateTime accountLockedUntil;
-
     @Column(name = "password_changed_at")
     private LocalDateTime passwordChangedAt;
 
@@ -172,7 +162,10 @@ public class User extends BaseAuditableEntity implements UserDetails {
 
     @Override
     public boolean isAccountNonLocked() {
-        return accountLockedUntil == null || accountLockedUntil.isBefore(LocalDateTime.now());
+        // El bloqueo de cuentas se maneja en Redis mediante AccountLockoutRedisService
+        // Este método de UserDetails siempre retorna true
+        // La verificación real se hace en AuthServiceImpl usando accountLockoutRedisService
+        return true;
     }
 
     @Override
@@ -231,38 +224,9 @@ public class User extends BaseAuditableEntity implements UserDetails {
         return status == EnumStatus.INACTIVE;
     }
 
-    /**
-     * @deprecated El bloqueo de cuentas ahora se maneja en Redis mediante
-     *             AccountLockoutRedisService.
-     *             Este método se mantiene solo para compatibilidad con código
-     *             legacy.
-     */
-    @Deprecated
-    public boolean isAccountTemporarilyLocked() {
-        return accountLockedUntil != null &&
-                accountLockedUntil.isAfter(LocalDateTime.now());
-    }
-
     // Security methods
-
-    /**
-     * @deprecated El bloqueo de cuentas ahora se maneja en Redis mediante
-     *             AccountLockoutRedisService.
-     *             Este método se mantiene solo para compatibilidad con código
-     *             legacy.
-     */
-    @Deprecated
-    public void lockAccount(int minutesToLock) {
-        this.accountLockedUntil = LocalDateTime.now().plusMinutes(minutesToLock);
-    }
-
-    /**
-     * Resetea el bloqueo de cuenta (solo limpia datos legacy de BD).
-     * El bloqueo real ahora se maneja en Redis.
-     */
-    public void resetAccountLock() {
-        this.accountLockedUntil = null;
-    }
+    // Nota: El bloqueo de cuentas se maneja completamente en Redis
+    // mediante AccountLockoutRedisService, no en la base de datos
 
     public void markPhoneAsVerified() {
         this.phoneVerified = true;

@@ -15,9 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -30,6 +28,8 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import jakarta.servlet.http.HttpServletRequest;
+
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 /**
@@ -42,7 +42,6 @@ import java.time.LocalDateTime;
 @Transactional
 public class AuthServiceImpl implements AuthService {
 
-    private final AuthenticationManager authenticationManager;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
@@ -227,9 +226,9 @@ public class AuthServiceImpl implements AuthService {
 
             // Verificar bloqueo en Redis (prioridad sobre BD)
             if (accountLockoutRedisService.isAccountLocked(user.getId())) {
-                java.time.Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
+                Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
                 log.warn("Intento de login en cuenta bloqueada (Redis): {} - Tiempo restante: {} minutos",
-                        loginDTO.email(), remainingTime.toMinutes());
+                        normalizedEmail, remainingTime.toMinutes());
                 throw new BadCredentialsException(
                         String.format("Cuenta temporalmente bloqueada. Intenta nuevamente en %d minutos",
                                 remainingTime.toMinutes()));
@@ -239,29 +238,27 @@ public class AuthServiceImpl implements AuthService {
                 throw new BadCredentialsException("Cuenta no activada. Verifica tu email.");
             }
 
-            try {
-                Authentication authentication = authenticationManager.authenticate(
-                        new UsernamePasswordAuthenticationToken(
-                                normalizedEmail,
-                                loginDTO.password()));
-
-                handleSuccessfulLogin(user);
-                JwtSessionService.SessionTokens sessionTokens = createUserSession(user);
-                logLoginSuccess(user, sessionTokens);
-
-                UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
-
-                return AuthResponseDTO.success(
-                        sessionTokens.getAccessToken(),
-                        sessionTokens.getRefreshToken(),
-                        sessionTokens.getExpiresIn() * 1000,
-                        userInfo);
-
-            } catch (BadCredentialsException e) {
+            // Validar contraseña manualmente para tener control total del flujo
+            if (!passwordEncoder.matches(loginDTO.password(), user.getPassword())) {
+                log.warn("Contraseña incorrecta para usuario: {}", normalizedEmail);
+                // handleFailedLogin lanza BadCredentialsException con el mensaje apropiado
                 handleFailedLogin(user, normalizedEmail);
-                throw e;
+                // Esta línea nunca se alcanza, pero Java requiere un return
+                throw new RuntimeException("Unreachable code");
             }
 
+            // Autenticación exitosa
+            handleSuccessfulLogin(user);
+            JwtSessionService.SessionTokens sessionTokens = createUserSession(user);
+            logLoginSuccess(user, sessionTokens);
+
+            UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
+
+            return AuthResponseDTO.success(
+                    sessionTokens.getAccessToken(),
+                    sessionTokens.getRefreshToken(),
+                    sessionTokens.getExpiresIn() * 1000,
+                    userInfo);
         } catch (UsernameNotFoundException e) {
             log.warn("Intento de login con email no registrado: {}", normalizedEmail);
             throw new BadCredentialsException("Email o contraseña incorrectos");
@@ -312,27 +309,34 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * Maneja un intento de login fallido
-     * Ahora usa Redis para el tracking de intentos
+     * Usa Redis para el tracking de intentos y lanza la excepción apropiada
+     * 
+     * @param user Usuario que intentó hacer login
+     * @param email Email usado en el intento
+     * @throws BadCredentialsException con mensaje apropiado según el estado de bloqueo
      */
     private void handleFailedLogin(User user, String email) {
         log.warn("Intento fallido de login para usuario: {}", email);
 
-        // Registrar intento fallido en Redis
+        // Registrar intento fallido en Redis (esto puede bloquear la cuenta automáticamente)
         int failedAttempts = accountLockoutRedisService.recordFailedAttempt(user.getId());
-        int remainingAttempts = accountLockoutRedisService.getRemainingAttempts(user.getId());
 
-        // Verificar si la cuenta fue bloqueada
+        // Verificar si la cuenta se bloqueó después de registrar el intento
         if (accountLockoutRedisService.isAccountLocked(user.getId())) {
-            log.error("Cuenta bloqueada en Redis para usuario: {} - Intentos: {}", email, failedAttempts);
+            Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
+            log.error("Cuenta bloqueada en Redis para usuario: {} - Intentos: {} - Tiempo restante: {} minutos",
+                    email, failedAttempts, remainingTime.toMinutes());
+            
             throw new BadCredentialsException(
                     String.format("Cuenta bloqueada por %d minutos debido a múltiples intentos fallidos",
-                            lockoutDurationMinutes));
+                            remainingTime.toMinutes()));
         }
 
-        // Informar intentos restantes
+        // Si no está bloqueada, informar intentos restantes
+        int remainingAttempts = accountLockoutRedisService.getRemainingAttempts(user.getId());
         log.warn("Credenciales inválidas - Intentos fallidos: {} - Restantes: {}",
                 failedAttempts, remainingAttempts);
-
+        
         throw new BadCredentialsException(
                 String.format("Email o contraseña incorrectos. Intentos restantes: %d",
                         remainingAttempts));
@@ -342,17 +346,11 @@ public class AuthServiceImpl implements AuthService {
      * Maneja un login exitoso
      * Resetea intentos fallidos en Redis y actualiza info de login
      */
-    @SuppressWarnings("deprecation") // Uso intencional para migración gradual
     private void handleSuccessfulLogin(User user) {
         log.info("Login exitoso para usuario: {}", user.getEmail());
 
         // Resetear intentos fallidos en Redis
         accountLockoutRedisService.resetFailedAttempts(user.getId());
-
-        // Limpiar datos antiguos de BD si existen (migración gradual)
-        if (user.getAccountLockedUntil() != null) {
-            user.resetAccountLock();
-        }
 
         updateLastLoginInfo(user);
         userRepository.save(user);
@@ -419,7 +417,6 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    @SuppressWarnings("deprecation") // Uso intencional para migración gradual
     public AuthResponseDTO verifyUnlockCode(VerifyUnlockCodeDTO verifyUnlockCodeDTO) {
         log.info("Procesando verificación de código de desbloqueo");
 
@@ -443,12 +440,6 @@ public class AuthServiceImpl implements AuthService {
             // Desbloquear en Redis
             accountLockoutRedisService.unlockAccount(userId);
 
-            // Limpiar datos antiguos de BD si existen
-            if (user.getAccountLockedUntil() != null) {
-                user.resetAccountLock();
-                userRepository.save(user);
-            }
-
             log.info("Cuenta desbloqueada exitosamente para usuario: {} - Email: {}", userId, user.getEmail());
 
             try {
@@ -469,7 +460,6 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Transactional
-    @SuppressWarnings("deprecation") // Uso intencional para migración gradual
     public void unlockUserAccount(String email) {
         String normalizedEmail = email.toLowerCase().trim();
         User user = userRepository.findByEmail(normalizedEmail)
@@ -478,13 +468,7 @@ public class AuthServiceImpl implements AuthService {
         // Desbloquear en Redis
         accountLockoutRedisService.unlockAccount(user.getId());
 
-        // Limpiar BD también
-        if (user.getAccountLockedUntil() != null) {
-            user.resetAccountLock();
-        }
-        userRepository.save(user);
-
-        log.info("Cuenta desbloqueada manualmente para usuario: {} (Redis + BD)", normalizedEmail);
+        log.info("Cuenta desbloqueada manualmente para usuario: {} (Redis)", normalizedEmail);
     }
 
     // ============================================================================
@@ -521,7 +505,6 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    @SuppressWarnings("deprecation") // Uso intencional para migración gradual
     public AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO) {
         log.info("Procesando reseteo de contraseña");
 
@@ -546,11 +529,6 @@ public class AuthServiceImpl implements AuthService {
 
             user.setPassword(passwordEncoder.encode(resetPasswordDTO.password()));
             user.setPasswordChangedAt(LocalDateTime.now());
-
-            // Limpiar bloqueo legacy si existe
-            if (user.getAccountLockedUntil() != null) {
-                user.resetAccountLock();
-            }
 
             userRepository.save(user);
 
@@ -580,7 +558,6 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    @SuppressWarnings("deprecation") // Uso intencional para migración gradual
     public AuthResponseDTO changePassword(ChangePasswordDTO changePasswordDTO) {
         log.info("Procesando cambio de contraseña");
 
@@ -615,17 +592,16 @@ public class AuthServiceImpl implements AuthService {
                 return AuthResponseDTO.error("Cuenta deshabilitada");
             }
 
-            if (user.isAccountTemporarilyLocked()) {
-                return AuthResponseDTO.error("Cuenta bloqueada temporalmente");
+            // Verificar bloqueo en Redis
+            if (accountLockoutRedisService.isAccountLocked(user.getId())) {
+                Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
+                return AuthResponseDTO.error(
+                    String.format("Cuenta bloqueada temporalmente. Intenta nuevamente en %d minutos",
+                        remainingTime.toMinutes()));
             }
 
             user.setPassword(passwordEncoder.encode(changePasswordDTO.newPassword()));
             user.setPasswordChangedAt(LocalDateTime.now());
-
-            // Limpiar bloqueo legacy si existe
-            if (user.getAccountLockedUntil() != null) {
-                user.resetAccountLock();
-            }
 
             userRepository.save(user);
 
@@ -951,7 +927,8 @@ public class AuthServiceImpl implements AuthService {
                 Long remainingTime = jwtUtil.getTokenRemainingTime(token);
 
                 User user = userRepository.findByEmail(username).orElse(null);
-                if (user == null || !user.isEnabled() || user.isAccountTemporarilyLocked()) {
+                if (user == null || !user.isEnabled() || 
+                    accountLockoutRedisService.isAccountLocked(user.getId())) {
                     return TokenValidationDTO.invalid("Usuario no válido");
                 }
 
@@ -994,7 +971,8 @@ public class AuthServiceImpl implements AuthService {
                 return AuthResponseDTO.error("Usuario inactivo");
             }
 
-            if (user.isAccountTemporarilyLocked()) {
+            // Verificar bloqueo en Redis
+            if (accountLockoutRedisService.isAccountLocked(user.getId())) {
                 log.warn("Intento de refresh token con cuenta bloqueada: {}", user.getEmail());
                 return AuthResponseDTO.error("Cuenta bloqueada");
             }

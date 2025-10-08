@@ -1,7 +1,7 @@
 package com.e_commerce.e_commerce_back.config;
 
-import com.e_commerce.e_commerce_back.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
+import com.e_commerce.e_commerce_back.repository.UserRepository;    
+import lombok.RequiredArgsConstructor;  
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
