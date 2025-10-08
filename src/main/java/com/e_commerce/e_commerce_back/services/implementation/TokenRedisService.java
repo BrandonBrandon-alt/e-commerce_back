@@ -59,12 +59,6 @@ public class TokenRedisService {
     private static final String RATE_LIMIT_SUFFIX = "_rate_limit:";
     private static final String EMAIL_CHANGE_PREFIX = "email_change:";
 
-    // Mappings para búsqueda eficiente
-    private static final String ACTIVATION_MAPPING_PREFIX = "activation_mapping:";
-    private static final String RESET_MAPPING_PREFIX = "reset_mapping:";
-    private static final String UNLOCK_MAPPING_PREFIX = "unlock_mapping:";
-    private static final String EMAIL_CHANGE_MAPPING_PREFIX = "email_change_mapping:";
-
     // ================= ACTIVATION CODE (MEJORADO) =================
 
     /**

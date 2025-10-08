@@ -6,8 +6,6 @@ import com.e_commerce.e_commerce_back.dto.ActivateAccountDTO;
 import com.e_commerce.e_commerce_back.dto.RegisterUserDTO;
 import com.e_commerce.e_commerce_back.dto.TokenValidationDTO;
 import com.e_commerce.e_commerce_back.dto.LoginDTO;
-import com.e_commerce.e_commerce_back.dto.RequestImmediateUnlockDTO;
-import com.e_commerce.e_commerce_back.dto.VerifyUnlockCodeDTO;
 import com.e_commerce.e_commerce_back.entity.User;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
@@ -36,8 +34,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)

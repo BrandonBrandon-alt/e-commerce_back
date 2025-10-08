@@ -288,26 +288,27 @@ public class AuthController {
     }
 
     /**
-     * Endpoint para cambiar email (usuario autenticado)
+     * Endpoint para solicitar cambio de email (usuario autenticado)
+     * Paso 1: Envía código de verificación al nuevo email
      */
-    @PutMapping("/change-email")
-    @Operation(summary = "Cambiar email", description = "Cambia el email del usuario autenticado")
+    @PostMapping("/request-email-change")
+    @Operation(summary = "Solicitar cambio de email", description = "Envía un código de verificación al nuevo email para confirmar el cambio")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Email cambiado exitosamente"),
+            @ApiResponse(responseCode = "200", description = "Código de verificación enviado"),
             @ApiResponse(responseCode = "400", description = "Emails no coinciden o contraseña incorrecta"),
             @ApiResponse(responseCode = "401", description = "No autenticado"),
             @ApiResponse(responseCode = "409", description = "Email ya existe")
     })
-    public ResponseEntity<AuthResponseDTO> changeEmail(@Valid @RequestBody ChangeEmailDTO changeEmailDTO) {
+    public ResponseEntity<AuthResponseDTO> requestEmailChange(@Valid @RequestBody RequestEmailChangeDTO requestEmailChangeDTO) {
         log.info("Solicitud de cambio de email");
 
         try {
-            AuthResponseDTO response = authService.changeEmail(changeEmailDTO);
-            log.info("Email cambiado exitosamente");
+            AuthResponseDTO response = authService.requestEmailChange(requestEmailChangeDTO);
+            log.info("Código de verificación enviado al nuevo email");
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            log.error("Error cambiando email: {}", e.getMessage());
+            log.error("Error solicitando cambio de email: {}", e.getMessage());
             throw e;
         }
     }
