@@ -49,7 +49,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
     private static final int BEARER_PREFIX_LENGTH = 7;
-    private static final String TOKEN_INVALID_REASON_HEADER = "X-Token-Invalid-Reason";
 
     /**
      * Rutas públicas que no requieren autenticación JWT.
