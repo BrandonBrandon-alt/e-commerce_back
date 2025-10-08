@@ -111,6 +111,7 @@ public class RedisConfig {
     /**
      * Bean secundario para operaciones con strings simples
      * Renombrado para evitar conflicto con el bean de Spring Boot
+     * IMPORTANTE: No habilitar transacciones para operaciones atómicas como INCR
      */
     @Bean("customStringRedisTemplate")
     public RedisTemplate<String, String> customStringRedisTemplate(RedisConnectionFactory connectionFactory) {
@@ -125,7 +126,8 @@ public class RedisConfig {
         template.setHashKeySerializer(stringSerializer);
         template.setHashValueSerializer(stringSerializer);
         
-        template.setEnableTransactionSupport(true);
+        // NO habilitar transacciones para operaciones atómicas
+        template.setEnableTransactionSupport(false);
         template.afterPropertiesSet();
         
         log.info("RedisTemplate<String, String> personalizado configurado exitosamente");

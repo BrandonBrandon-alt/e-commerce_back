@@ -64,6 +64,7 @@ public class AccountLockoutRedisService {
         Long attempts = redisTemplate.opsForValue().increment(key);
         
         if (attempts == null) {
+            log.error("Error: Redis increment retornó null para userId: {}", userId);
             attempts = 1L;
         }
         
