@@ -132,6 +132,30 @@ public class AuthController {
     }
 
     /**
+     * Endpoint para login con Google OAuth2
+     */
+    @PostMapping("/login/google")
+    @Operation(summary = "Iniciar sesión con Google", description = "Autentica un usuario con Google OAuth2 y devuelve un token JWT")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Login exitoso"),
+            @ApiResponse(responseCode = "401", description = "Token de Google inválido"),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos")
+    })
+    public ResponseEntity<AuthResponseDTO> loginWithGoogle(@Valid @RequestBody GoogleOAuthLoginDTO googleOAuthLoginDTO) {
+        log.info("Intento de login con Google OAuth");
+
+        try {
+            AuthResponseDTO response = authService.loginWithGoogle(googleOAuthLoginDTO);
+            log.info("Login con Google exitoso");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error en login con Google: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
      * Endpoint para logout (invalidar token)
      */
     @PostMapping("/logout")

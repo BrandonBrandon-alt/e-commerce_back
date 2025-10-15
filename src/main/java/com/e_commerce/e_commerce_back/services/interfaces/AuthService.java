@@ -15,6 +15,13 @@ public interface AuthService {
     AuthResponseDTO login(LoginDTO loginDTO);
 
     /**
+     * Autentica un usuario con Google OAuth2
+     * @param googleOAuthLoginDTO Token de ID de Google
+     * @return Respuesta con token y información del usuario
+     */
+    AuthResponseDTO loginWithGoogle(GoogleOAuthLoginDTO googleOAuthLoginDTO);
+
+    /**
      * Registra un nuevo usuario
      * @param createUserDTO Datos del usuario a registrar
      * @return Respuesta de registro

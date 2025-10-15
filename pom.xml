@@ -167,6 +167,13 @@
 			<artifactId>spring-dotenv</artifactId>
 			<version>4.0.0</version>
 		</dependency>
+
+		<!-- Google API Client for OAuth2 Token Verification -->
+		<dependency>
+			<groupId>com.google.api-client</groupId>
+			<artifactId>google-api-client</artifactId>
+			<version>2.2.0</version>
+		</dependency>
 		
 		<!-- Lettuce Redis Client (incluido por defecto con spring-boot-starter-data-redis) -->
 		<!-- Pero si prefieres Jedis, puedes usar esto en su lugar:

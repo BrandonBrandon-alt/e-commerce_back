@@ -49,6 +49,7 @@ public class AuthServiceImpl implements AuthService {
     private final TokenRedisService tokenRedisService;
     private final JwtSessionService jwtSessionService;
     private final AccountLockoutRedisService accountLockoutRedisService;
+    private final GoogleOAuthService googleOAuthService;
 
     @Value("${app.jwt.expiration}")
     private Long jwtExpiration;
@@ -300,6 +301,88 @@ public class AuthServiceImpl implements AuthService {
         } catch (Exception e) {
             log.error("Error en logout: {}", e.getMessage());
             SecurityContextHolder.clearContext();
+        }
+    }
+
+    @Override
+    public AuthResponseDTO loginWithGoogle(GoogleOAuthLoginDTO googleOAuthLoginDTO) {
+        log.info("Procesando login con Google OAuth");
+
+        try {
+            // Verificar el token de Google
+            com.google.api.client.googleapis.auth.oauth2.GoogleIdToken.Payload payload = 
+                googleOAuthService.verifyGoogleToken(googleOAuthLoginDTO.idToken());
+
+            String email = googleOAuthService.getEmail(payload);
+            String normalizedEmail = email.toLowerCase().trim();
+            Boolean emailVerified = googleOAuthService.isEmailVerified(payload);
+
+            log.info("Token de Google verificado para email: {}", normalizedEmail);
+
+            // Buscar o crear usuario
+            User user = userRepository.findByEmail(normalizedEmail)
+                    .orElseGet(() -> {
+                        log.info("Usuario no existe, creando nuevo usuario desde Google: {}", normalizedEmail);
+                        
+                        String givenName = googleOAuthService.getGivenName(payload);
+                        String familyName = googleOAuthService.getFamilyName(payload);
+                        
+                        User newUser = User.builder()
+                                .email(normalizedEmail)
+                                .name(givenName != null ? givenName : "Google")
+                                .lastName(familyName != null ? familyName : "User")
+                                .idNumber("GOOGLE-" + payload.getSubject()) // ID único de Google
+                                .password(passwordEncoder.encode(java.util.UUID.randomUUID().toString())) // Password aleatorio
+                                .role(EnumRole.USER)
+                                .status(EnumStatus.ACTIVE) // Activado automáticamente
+                                .emailVerified(emailVerified != null ? emailVerified : true) // Email verificado por Google
+                                .phoneVerified(false)
+                                .build();
+
+                        return userRepository.save(newUser);
+                    });
+
+            // Verificar si la cuenta está habilitada
+            if (!user.isEnabled()) {
+                // Si el usuario existe pero no está activado, activarlo automáticamente
+                // ya que Google verificó el email
+                user.setStatus(EnumStatus.ACTIVE);
+                user.setEmailVerified(true);
+                user = userRepository.save(user);
+                log.info("Cuenta activada automáticamente por Google OAuth: {}", normalizedEmail);
+            }
+
+            // Verificar bloqueo
+            if (accountLockoutRedisService.isAccountLocked(user.getId())) {
+                Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
+                log.warn("Intento de login OAuth en cuenta bloqueada: {} - Tiempo restante: {} minutos",
+                        normalizedEmail, remainingTime.toMinutes());
+                throw new BadCredentialsException(
+                        String.format("Cuenta temporalmente bloqueada. Intenta nuevamente en %d minutos",
+                                remainingTime.toMinutes()));
+            }
+
+            // Autenticación exitosa
+            handleSuccessfulLogin(user);
+            JwtSessionService.SessionTokens sessionTokens = createUserSession(user);
+            logLoginSuccess(user, sessionTokens);
+
+            UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
+
+            return AuthResponseDTO.success(
+                    sessionTokens.getAccessToken(),
+                    sessionTokens.getRefreshToken(),
+                    sessionTokens.getExpiresIn() * 1000,
+                    userInfo);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Token de Google inválido: {}", e.getMessage());
+            throw new BadCredentialsException("Token de Google inválido");
+        } catch (BadCredentialsException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error en login con Google: {}", e.getMessage(), e);
+            throw new RuntimeException("Error interno del servidor");
         }
     }
 
