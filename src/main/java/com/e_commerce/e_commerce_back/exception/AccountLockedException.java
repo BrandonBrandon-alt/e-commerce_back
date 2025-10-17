@@ -6,3 +6,4 @@ public class AccountLockedException extends RuntimeException {
         super(message);
     }
 }
+    

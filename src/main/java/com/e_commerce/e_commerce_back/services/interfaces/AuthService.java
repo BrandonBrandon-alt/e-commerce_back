@@ -125,6 +125,13 @@ public interface AuthService {
      */
     AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO);
 
+    /**
+     * Reenvía el código de reseteo a un usuario
+     * @param resendresetCodeDTO Datos de reenvío de código de reseteo
+     * @return Respuesta de reenvío
+     */
+    AuthResponseDTO resendResetCode(ResendresetCodeDTO resendresetCodeDTO);
+
     //-------------------GESTION DE LA CUENTA-------------------//
 
     /**

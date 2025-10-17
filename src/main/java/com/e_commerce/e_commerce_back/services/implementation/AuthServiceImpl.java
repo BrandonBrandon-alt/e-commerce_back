@@ -2,6 +2,8 @@ package com.e_commerce.e_commerce_back.services.implementation;
 
 import com.e_commerce.e_commerce_back.dto.*;
 import com.e_commerce.e_commerce_back.entity.User;
+import com.e_commerce.e_commerce_back.exception.AccountLockedException;
+import com.e_commerce.e_commerce_back.exception.AccountNotActivatedException;
 import com.e_commerce.e_commerce_back.exception.EmailIsExists;
 import com.e_commerce.e_commerce_back.exception.IdNumberIsExists;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
@@ -221,54 +223,41 @@ public class AuthServiceImpl implements AuthService {
         String normalizedEmail = loginDTO.email().toLowerCase().trim();
         log.info("Procesando login para email: {}", normalizedEmail);
 
-        try {
-            User user = userRepository.findByEmail(normalizedEmail)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+        User user = userRepository.findByEmail(normalizedEmail)
+                .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 
-            // Verificar bloqueo en Redis (prioridad sobre BD)
-            if (accountLockoutRedisService.isAccountLocked(user.getId())) {
-                Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
-                log.warn("Intento de login en cuenta bloqueada (Redis): {} - Tiempo restante: {} minutos",
-                        normalizedEmail, remainingTime.toMinutes());
-                throw new BadCredentialsException(
-                        String.format("Cuenta temporalmente bloqueada. Intenta nuevamente en %d minutos",
-                                remainingTime.toMinutes()));
-            }
-
-            if (!user.isEnabled()) {
-                throw new BadCredentialsException("Cuenta no activada. Verifica tu email.");
-            }
-
-            // Validar contraseña manualmente para tener control total del flujo
-            if (!passwordEncoder.matches(loginDTO.password(), user.getPassword())) {
-                log.warn("Contraseña incorrecta para usuario: {}", normalizedEmail);
-                // handleFailedLogin lanza BadCredentialsException con el mensaje apropiado
-                handleFailedLogin(user, normalizedEmail);
-                // Esta línea nunca se alcanza, pero Java requiere un return
-                throw new RuntimeException("Unreachable code");
-            }
-
-            // Autenticación exitosa
-            handleSuccessfulLogin(user);
-            JwtSessionService.SessionTokens sessionTokens = createUserSession(user);
-            logLoginSuccess(user, sessionTokens);
-
-            UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
-
-            return AuthResponseDTO.success(
-                    sessionTokens.getAccessToken(),
-                    sessionTokens.getRefreshToken(),
-                    sessionTokens.getExpiresIn() * 1000,
-                    userInfo);
-        } catch (UsernameNotFoundException e) {
-            log.warn("Intento de login con email no registrado: {}", normalizedEmail);
-            throw new BadCredentialsException("Email o contraseña incorrectos");
-        } catch (BadCredentialsException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("Error en login para email: {}, error: {}", normalizedEmail, e.getMessage());
-            throw new RuntimeException("Error interno del servidor");
+        // Verificar bloqueo en Redis (prioridad sobre BD)
+        if (accountLockoutRedisService.isAccountLocked(user.getId())) {
+            Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
+            log.warn("Intento de login en cuenta bloqueada (Redis): {} - Tiempo restante: {} minutos",
+                    normalizedEmail, remainingTime.toMinutes());
+            throw new AccountLockedException(
+                    String.format("Cuenta temporalmente bloqueada. Intenta nuevamente en %d minutos",
+                            remainingTime.toMinutes()));
         }
+
+        if (!user.isEnabled()) {
+            throw new AccountNotActivatedException("Cuenta no activada. Verifica tu email.");
+        }
+
+        if (!passwordEncoder.matches(loginDTO.password(), user.getPassword())) {
+            log.warn("Contraseña incorrecta para usuario: {}", normalizedEmail);
+            handleFailedLogin(user, normalizedEmail);
+            throw new BadCredentialsException("Email o contraseña incorrectos");
+        }
+
+        // Autenticación exitosa
+        handleSuccessfulLogin(user);
+        JwtSessionService.SessionTokens sessionTokens = createUserSession(user);
+        logLoginSuccess(user, sessionTokens);
+
+        UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
+
+        return AuthResponseDTO.success(
+                sessionTokens.getAccessToken(),
+                sessionTokens.getRefreshToken(),
+                sessionTokens.getExpiresIn() * 1000,
+                userInfo);
     }
 
     @Override
@@ -310,8 +299,8 @@ public class AuthServiceImpl implements AuthService {
 
         try {
             // Verificar el token de Google
-            com.google.api.client.googleapis.auth.oauth2.GoogleIdToken.Payload payload = 
-                googleOAuthService.verifyGoogleToken(googleOAuthLoginDTO.idToken());
+            com.google.api.client.googleapis.auth.oauth2.GoogleIdToken.Payload payload = googleOAuthService
+                    .verifyGoogleToken(googleOAuthLoginDTO.idToken());
 
             String email = googleOAuthService.getEmail(payload);
             String normalizedEmail = email.toLowerCase().trim();
@@ -323,19 +312,21 @@ public class AuthServiceImpl implements AuthService {
             User user = userRepository.findByEmail(normalizedEmail)
                     .orElseGet(() -> {
                         log.info("Usuario no existe, creando nuevo usuario desde Google: {}", normalizedEmail);
-                        
+
                         String givenName = googleOAuthService.getGivenName(payload);
                         String familyName = googleOAuthService.getFamilyName(payload);
-                        
+
                         User newUser = User.builder()
                                 .email(normalizedEmail)
                                 .name(givenName != null ? givenName : "Google")
                                 .lastName(familyName != null ? familyName : "User")
                                 .idNumber("GOOGLE-" + payload.getSubject()) // ID único de Google
-                                .password(passwordEncoder.encode(java.util.UUID.randomUUID().toString())) // Password aleatorio
+                                .password(passwordEncoder.encode(java.util.UUID.randomUUID().toString())) // Password
+                                                                                                          // aleatorio
                                 .role(EnumRole.USER)
                                 .status(EnumStatus.ACTIVE) // Activado automáticamente
-                                .emailVerified(emailVerified != null ? emailVerified : true) // Email verificado por Google
+                                .emailVerified(emailVerified != null ? emailVerified : true) // Email verificado por
+                                                                                             // Google
                                 .phoneVerified(false)
                                 .build();
 
@@ -394,14 +385,16 @@ public class AuthServiceImpl implements AuthService {
      * Maneja un intento de login fallido
      * Usa Redis para el tracking de intentos y lanza la excepción apropiada
      * 
-     * @param user Usuario que intentó hacer login
+     * @param user  Usuario que intentó hacer login
      * @param email Email usado en el intento
-     * @throws BadCredentialsException con mensaje apropiado según el estado de bloqueo
+     * @throws BadCredentialsException con mensaje apropiado según el estado de
+     *                                 bloqueo
      */
     private void handleFailedLogin(User user, String email) {
         log.warn("Intento fallido de login para usuario: {}", email);
 
-        // Registrar intento fallido en Redis (esto puede bloquear la cuenta automáticamente)
+        // Registrar intento fallido en Redis (esto puede bloquear la cuenta
+        // automáticamente)
         int failedAttempts = accountLockoutRedisService.recordFailedAttempt(user.getId());
 
         // Verificar si la cuenta se bloqueó después de registrar el intento
@@ -409,7 +402,7 @@ public class AuthServiceImpl implements AuthService {
             Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
             log.error("Cuenta bloqueada en Redis para usuario: {} - Intentos: {} - Tiempo restante: {} minutos",
                     email, failedAttempts, remainingTime.toMinutes());
-            
+
             throw new BadCredentialsException(
                     String.format("Cuenta bloqueada por %d minutos debido a múltiples intentos fallidos",
                             remainingTime.toMinutes()));
@@ -419,7 +412,7 @@ public class AuthServiceImpl implements AuthService {
         int remainingAttempts = accountLockoutRedisService.getRemainingAttempts(user.getId());
         log.warn("Credenciales inválidas - Intentos fallidos: {} - Restantes: {}",
                 failedAttempts, remainingAttempts);
-        
+
         throw new BadCredentialsException(
                 String.format("Email o contraseña incorrectos. Intentos restantes: %d",
                         remainingAttempts));
@@ -635,6 +628,42 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
+    @Override
+    public AuthResponseDTO resendResetCode(ResendresetCodeDTO resendresetCodeDTO) {
+        String normalizedEmail = resendresetCodeDTO.email().toLowerCase().trim();
+        log.info("Procesando reenvío de código de reseteo para email: {}", normalizedEmail);
+
+        try {
+            User user = userRepository.findByEmail(normalizedEmail)
+                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+
+            if (!tokenRedisService.canRequestToken(user.getId(), "reset")) {
+                return AuthResponseDTO.error("Demasiadas solicitudes. Intenta en 1 hora");
+            }
+
+            String newResetCode = tokenRedisService.generateAndStoreResetCode(user.getId());
+            log.info("Nuevo código de reseteo generado para usuario: {}", normalizedEmail);
+
+            try {
+                emailService.sendPasswordResetEmail(user, newResetCode);
+                log.info("Nuevo email de reseteo enviado a: {}", normalizedEmail);
+            } catch (Exception e) {
+                log.error("Error enviando nuevo email de reseteo a {}: {}",
+                        user.getEmail(), e.getMessage());
+                return AuthResponseDTO.error("Error enviando el email de reseteo");
+            }
+
+            return AuthResponseDTO.success("Nuevo código de reseteo enviado. Revisa tu email.");
+
+        } catch (UsernameNotFoundException e) {
+            log.warn("Intento de reenvío con email no registrado: {}", normalizedEmail);
+            return AuthResponseDTO.error("Usuario no encontrado");
+        } catch (Exception e) {
+            log.error("Error en reenvío para email: {}, error: {}", normalizedEmail, e.getMessage());
+            return AuthResponseDTO.error("Error interno del servidor");
+        }
+    }
+
     // ============================================================================
     // GESTIÓN DE CONTRASEÑA Y EMAIL
     // ============================================================================
@@ -679,8 +708,8 @@ public class AuthServiceImpl implements AuthService {
             if (accountLockoutRedisService.isAccountLocked(user.getId())) {
                 Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
                 return AuthResponseDTO.error(
-                    String.format("Cuenta bloqueada temporalmente. Intenta nuevamente en %d minutos",
-                        remainingTime.toMinutes()));
+                        String.format("Cuenta bloqueada temporalmente. Intenta nuevamente en %d minutos",
+                                remainingTime.toMinutes()));
             }
 
             user.setPassword(passwordEncoder.encode(changePasswordDTO.newPassword()));
@@ -1010,8 +1039,8 @@ public class AuthServiceImpl implements AuthService {
                 Long remainingTime = jwtUtil.getTokenRemainingTime(token);
 
                 User user = userRepository.findByEmail(username).orElse(null);
-                if (user == null || !user.isEnabled() || 
-                    accountLockoutRedisService.isAccountLocked(user.getId())) {
+                if (user == null || !user.isEnabled() ||
+                        accountLockoutRedisService.isAccountLocked(user.getId())) {
                     return TokenValidationDTO.invalid("Usuario no válido");
                 }
 

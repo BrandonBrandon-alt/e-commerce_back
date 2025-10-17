@@ -65,6 +65,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/auth/reset-password",
             "/api/auth/request-unlock",
             "/api/auth/verify-unlock-code",
+            "/api/auth/resend-reset-code",
             "/swagger-ui",
             "/v3/api-docs",
             "/swagger-resources",

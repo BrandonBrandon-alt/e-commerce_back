@@ -110,49 +110,24 @@ public class AuthController {
     /**
      * Endpoint para login de usuarios
      */
-    @PostMapping("/login")
-    @Operation(summary = "Iniciar sesión", description = "Autentica un usuario y devuelve un token JWT")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Login exitoso"),
-            @ApiResponse(responseCode = "401", description = "Credenciales inválidas"),
-            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos")
-    })
-    public ResponseEntity<AuthResponseDTO> login(@Valid @RequestBody LoginDTO loginDTO) {
-        log.info("Intento de login para email: {}", loginDTO.email());
-
-        try {
-            AuthResponseDTO response = authService.login(loginDTO);
-            log.info("Login exitoso para email: {}", loginDTO.email());
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error en login para email: {}, error: {}", loginDTO.email(), e.getMessage());
-            throw e;
-        }
-    }
 
     /**
      * Endpoint para login con Google OAuth2
      */
-    @PostMapping("/login/google")
-    @Operation(summary = "Iniciar sesión con Google", description = "Autentica un usuario con Google OAuth2 y devuelve un token JWT")
+    @PostMapping("/login")
+    @Operation(summary = "Iniciar sesión", description = "Autentica un usuario y devuelve un token JWT")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Login exitoso"),
-            @ApiResponse(responseCode = "401", description = "Token de Google inválido"),
+            @ApiResponse(responseCode = "401", description = "Credenciales inválidas o sesión expirada"),
+            @ApiResponse(responseCode = "403", description = "Cuenta no activada o acceso restringido"),
+            @ApiResponse(responseCode = "423", description = "Cuenta bloqueada temporalmente"),
             @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos")
     })
-    public ResponseEntity<AuthResponseDTO> loginWithGoogle(@Valid @RequestBody GoogleOAuthLoginDTO googleOAuthLoginDTO) {
-        log.info("Intento de login con Google OAuth");
-
-        try {
-            AuthResponseDTO response = authService.loginWithGoogle(googleOAuthLoginDTO);
-            log.info("Login con Google exitoso");
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Error en login con Google: {}", e.getMessage());
-            throw e;
-        }
+    public ResponseEntity<AuthResponseDTO> login(@Valid @RequestBody LoginDTO loginDTO) {
+        log.info("Intento de login para email: {}", loginDTO.email());
+        AuthResponseDTO response = authService.login(loginDTO);
+        log.info("Login exitoso para email: {}", loginDTO.email());
+        return ResponseEntity.ok(response);
     }
 
     /**
@@ -283,6 +258,30 @@ public class AuthController {
         }
     }
 
+    /**
+     * Endpoint para reenviar código de reseteo
+     */
+    @PostMapping("/resend-reset-code")
+    @Operation(summary = "Reenviar código de reseteo", description = "Reenvía el código de reseteo al email del usuario")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Código de reseteo reenviado exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
+    })
+    public ResponseEntity<AuthResponseDTO> resendResetCode(@Valid @RequestBody ResendresetCodeDTO resendresetCodeDTO) {
+        log.info("Reenvío de código de reseteo para email: {}", resendresetCodeDTO.email());
+
+        try {
+            AuthResponseDTO response = authService.resendResetCode(resendresetCodeDTO);
+            log.info("Reenvío de código de reseteo procesado exitosamente");
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error en reenvío de código de reseteo: {}", e.getMessage());
+            throw e;
+        }
+    }
+
     // ============================================================================
     // GESTIÓN DE CONTRASEÑA Y EMAIL
     // ============================================================================
@@ -323,7 +322,8 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "No autenticado"),
             @ApiResponse(responseCode = "409", description = "Email ya existe")
     })
-    public ResponseEntity<AuthResponseDTO> requestEmailChange(@Valid @RequestBody RequestEmailChangeDTO requestEmailChangeDTO) {
+    public ResponseEntity<AuthResponseDTO> requestEmailChange(
+            @Valid @RequestBody RequestEmailChangeDTO requestEmailChangeDTO) {
         log.info("Solicitud de cambio de email");
 
         try {
@@ -345,7 +345,8 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "No autenticado"),
             @ApiResponse(responseCode = "404", description = "Usuario no encontrado")
     })
-    public ResponseEntity<AuthResponseDTO> verifyEmailChange(@Valid @RequestBody VerifyEmailChangeDTO verifyEmailChangeDTO) {
+    public ResponseEntity<AuthResponseDTO> verifyEmailChange(
+            @Valid @RequestBody VerifyEmailChangeDTO verifyEmailChangeDTO) {
         log.info("Solicitud de verificación de cambio de email");
 
         try {

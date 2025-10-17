@@ -54,7 +54,8 @@ public class SecurityConfig {
                     "/api/auth/forgot-password",
                     "/api/auth/reset-password",
                     "/api/auth/request-unlock",
-                    "/api/auth/verify-unlock-code"
+                    "/api/auth/verify-unlock-code",
+                    "/api/auth/resend-reset-code"
                 ).permitAll()
                 // Documentación API (Swagger)
                 .requestMatchers(
