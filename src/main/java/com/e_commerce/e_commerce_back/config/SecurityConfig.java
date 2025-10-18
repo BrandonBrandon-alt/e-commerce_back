@@ -46,7 +46,6 @@ public class SecurityConfig {
                 // Rutas públicas de autenticación
                 .requestMatchers(
                     "/api/auth/login",
-                    "/api/auth/login/google",
                     "/api/auth/register",
                     "/api/auth/refresh-token",
                     "/api/auth/activate-account",

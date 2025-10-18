@@ -2,10 +2,15 @@ package com.e_commerce.e_commerce_back.services.implementation;
 
 import com.e_commerce.e_commerce_back.dto.*;
 import com.e_commerce.e_commerce_back.entity.User;
+import com.e_commerce.e_commerce_back.exception.AccountAlreadyActiveException;
 import com.e_commerce.e_commerce_back.exception.AccountLockedException;
 import com.e_commerce.e_commerce_back.exception.AccountNotActivatedException;
-import com.e_commerce.e_commerce_back.exception.EmailIsExists;
-import com.e_commerce.e_commerce_back.exception.IdNumberIsExists;
+import com.e_commerce.e_commerce_back.exception.EmailAlreadyExistsException;
+import com.e_commerce.e_commerce_back.exception.EmailServiceException;
+import com.e_commerce.e_commerce_back.exception.IdNumberAlreadyExistsException;
+import com.e_commerce.e_commerce_back.exception.InvalidVerificationCodeException;
+import com.e_commerce.e_commerce_back.exception.TooManyAttemptsException;
+import com.e_commerce.e_commerce_back.exception.UserNotFoundException;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
 import com.e_commerce.e_commerce_back.services.interfaces.AuthService;
@@ -51,7 +56,6 @@ public class AuthServiceImpl implements AuthService {
     private final TokenRedisService tokenRedisService;
     private final JwtSessionService jwtSessionService;
     private final AccountLockoutRedisService accountLockoutRedisService;
-    private final GoogleOAuthService googleOAuthService;
 
     @Value("${app.jwt.expiration}")
     private Long jwtExpiration;
@@ -71,52 +75,60 @@ public class AuthServiceImpl implements AuthService {
         String normalizedEmail = createUserDTO.email().toLowerCase().trim();
         log.info("Procesando registro para email: {}", normalizedEmail);
 
+        // Validaciones (lanza excepciones específicas)
+        validateEmailNotExists(normalizedEmail);
+        validateIdNumberNotExists(createUserDTO.idNumber());
+
+        // Crear y guardar usuario
+        User newUser = buildNewUser(createUserDTO, normalizedEmail);
+        User savedUser = userRepository.save(newUser);
+
+        // Generar y enviar código de activación
+        String activationCode = tokenRedisService.generateAndStoreActivationCode(savedUser.getId());
+        sendActivationEmail(savedUser, activationCode);
+
+        log.info("Usuario registrado exitosamente: {} - ID: {}", savedUser.getEmail(), savedUser.getId());
+
+        return AuthResponseDTO.registered(
+                "Usuario registrado exitosamente. Revisa tu email para activar tu cuenta con el código de 6 dígitos.");
+    }
+
+    // Métodos auxiliares de register
+    private void validateEmailNotExists(String email) {
+        if (userRepository.existsByEmail(email)) {
+            throw new EmailAlreadyExistsException("El email ya está registrado");
+        }
+    }
+
+    private void validateIdNumberNotExists(String idNumber) {
+        if (userRepository.findByIdNumber(idNumber).isPresent()) {
+            throw new IdNumberAlreadyExistsException("El número de identificación ya está registrado");
+        }
+    }
+
+    private User buildNewUser(RegisterUserDTO dto, String normalizedEmail) {
+        return User.builder()
+                .idNumber(dto.idNumber())
+                .name(dto.name())
+                .lastName(dto.lastName())
+                .email(normalizedEmail)
+                .phoneNumber(dto.phoneNumber())
+                .password(passwordEncoder.encode(dto.password()))
+                .dateOfBirth(dto.dateOfBirth())
+                .role(EnumRole.USER)
+                .status(EnumStatus.INACTIVE)
+                .emailVerified(false)
+                .phoneVerified(false)
+                .build();
+    }
+
+    private void sendActivationEmail(User user, String code) {
         try {
-            if (userRepository.existsByEmail(normalizedEmail)) {
-                throw new EmailIsExists("El email ya está registrado");
-            }
-
-            if (userRepository.findByIdNumber(createUserDTO.idNumber()).isPresent()) {
-                throw new IdNumberIsExists("El número de identificación ya está registrado");
-            }
-
-            User newUser = User.builder()
-                    .idNumber(createUserDTO.idNumber())
-                    .name(createUserDTO.name())
-                    .lastName(createUserDTO.lastName())
-                    .email(normalizedEmail)
-                    .phoneNumber(createUserDTO.phoneNumber())
-                    .password(passwordEncoder.encode(createUserDTO.password()))
-                    .dateOfBirth(createUserDTO.dateOfBirth())
-                    .role(EnumRole.USER)
-                    .status(EnumStatus.INACTIVE)
-                    .emailVerified(false)
-                    .phoneVerified(false)
-                    .build();
-
-            User savedUser = userRepository.save(newUser);
-            String activationCode = tokenRedisService.generateAndStoreActivationCode(savedUser.getId());
-
-            log.info("Usuario registrado exitosamente: {} - ID: {}",
-                    savedUser.getEmail(), savedUser.getId());
-
-            try {
-                emailService.sendActivationEmail(savedUser, activationCode);
-                log.info("Email de activación enviado a: {}", savedUser.getEmail());
-            } catch (Exception e) {
-                log.error("Error enviando email de activación a {}: {}",
-                        savedUser.getEmail(), e.getMessage());
-            }
-
-            return AuthResponseDTO.registered(
-                    "Usuario registrado exitosamente. Revisa tu email para activar tu cuenta con el código de 6 dígitos.");
-
-        } catch (EmailIsExists | IdNumberIsExists e) {
-            log.warn("Error de registro - {}: {}", e.getClass().getSimpleName(), e.getMessage());
-            throw e;
+            emailService.sendActivationEmail(user, code);
+            log.info("Email de activación enviado a: {}", user.getEmail());
         } catch (Exception e) {
-            log.error("Error en registro para email: {}, error: {}", normalizedEmail, e.getMessage());
-            throw new RuntimeException("Error interno del servidor durante el registro");
+            log.error("Error enviando email de activación a {}: {}", user.getEmail(), e.getMessage());
+            // No lanzar excepción - el usuario ya está registrado
         }
     }
 
@@ -125,52 +137,115 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO activateAccount(ActivateAccountDTO activateAccountDTO) {
         log.info("Procesando activación de cuenta con código: {}", activateAccountDTO.activationCode());
 
+        // ✨ Verificar código o lanzar excepción
+        Long userId = verifyActivationCodeOrThrow(activateAccountDTO.activationCode());
+
+        // ✨ Buscar usuario o lanzar excepción
+        User user = findUserByIdOrThrow(userId);
+
+        // ✨ Verificar si ya está activada
+        checkIfAccountAlreadyActive(user);
+
+        // ✨ Activar cuenta
+        activateUserAccount(user);
+
+        // ✨ Enviar email de bienvenida (no crítico)
+        sendWelcomeEmailSafely(user);
+
+        log.info("Cuenta activada exitosamente para usuario ID: {} - Email: {}", userId, user.getEmail());
+
+        return AuthResponseDTO.success("¡Cuenta activada exitosamente! Ya puedes iniciar sesión.");
+    }
+
+    /**
+     * Verifica el código de activación y lo consume
+     * 
+     * @throws InvalidVerificationCodeException si el código es inválido o expirado
+     */
+    private Long verifyActivationCodeOrThrow(String activationCode) {
+        Long userId = tokenRedisService.verifyAndConsumeActivationCode(activationCode);
+
+        if (userId == null) {
+            log.warn("Código de activación inválido o expirado");
+            throw new InvalidVerificationCodeException("Código de activación incorrecto o expirado");
+        }
+
+        return userId;
+    }
+
+    /**
+     * Busca un usuario por ID
+     * 
+     * @throws UserNotFoundException si no se encuentra
+     */
+    private User findUserByIdOrThrow(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado con ID: " + userId));
+    }
+
+    /**
+     * Verifica si la cuenta ya está activada
+     * 
+     * @throws AccountAlreadyActiveException si ya está activa
+     */
+    private void checkIfAccountAlreadyActive(User user) {
+        if (user.getStatus() == EnumStatus.ACTIVE && Boolean.TRUE.equals(user.getEmailVerified())) {
+            log.info("La cuenta del usuario {} ya está activada", user.getEmail());
+            throw new AccountAlreadyActiveException("La cuenta ya está activada");
+        }
+    }
+
+    private void checkAccountActivated(User user) {
+        if (!user.isEnabled()) {
+            throw new AccountNotActivatedException(
+                    "Cuenta no activada. Verifica tu email.");
+        }
+    }
+
+    /**
+     * Activa la cuenta del usuario
+     */
+    private void activateUserAccount(User user) {
+        log.info("Estado antes de activar - Status: {}, EmailVerified: {}",
+                user.getStatus(), user.getEmailVerified());
+
+        user.setStatus(EnumStatus.ACTIVE);
+        user.setEmailVerified(true);
+
+        User savedUser = userRepository.save(user);
+        userRepository.flush();
+
+        log.info("Estado después de activar - Status: {}, EmailVerified: {}, isEnabled: {}",
+                savedUser.getStatus(), savedUser.getEmailVerified(), savedUser.isEnabled());
+    }
+
+    /**
+     * Envía email de bienvenida sin lanzar excepción si falla
+     */
+    private void sendWelcomeEmailSafely(User user) {
         try {
-            Long userId = tokenRedisService.verifyAndConsumeActivationCode(activateAccountDTO.activationCode());
-
-            if (userId == null) {
-                log.warn("Código de activación inválido o expirado");
-                return AuthResponseDTO.error("Código de activación incorrecto o expirado");
-            }
-
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado con ID: " + userId));
-
-            if (user.getStatus() == EnumStatus.ACTIVE && Boolean.TRUE.equals(user.getEmailVerified())) {
-                log.info("La cuenta del usuario {} ya está activada", user.getEmail());
-                return AuthResponseDTO.error("La cuenta ya está activada");
-            }
-
-            log.info("Estado antes de activar - Status: {}, EmailVerified: {}",
-                    user.getStatus(), user.getEmailVerified());
-
-            user.setStatus(EnumStatus.ACTIVE);
-            user.setEmailVerified(true);
-
-            User savedUser = userRepository.save(user);
-            userRepository.flush();
-
-            log.info("Estado después de activar - Status: {}, EmailVerified: {}, isEnabled: {}",
-                    savedUser.getStatus(), savedUser.getEmailVerified(), savedUser.isEnabled());
-
-            log.info("Cuenta activada exitosamente para usuario ID: {} - Email: {}",
-                    userId, savedUser.getEmail());
-
-            try {
-                emailService.sendWelcomeEmail(savedUser);
-                log.info("Email de bienvenida enviado a: {}", savedUser.getEmail());
-            } catch (Exception e) {
-                log.error("Error enviando email de bienvenida a {}: {}", savedUser.getEmail(), e.getMessage());
-            }
-
-            return AuthResponseDTO.success("¡Cuenta activada exitosamente! Ya puedes iniciar sesión.");
-
-        } catch (UsernameNotFoundException e) {
-            log.error("Usuario no encontrado al activar cuenta: {}", e.getMessage());
-            return AuthResponseDTO.error("Usuario no encontrado");
+            emailService.sendWelcomeEmail(user);
+            log.info("Email de bienvenida enviado a: {}", user.getEmail());
         } catch (Exception e) {
-            log.error("Error en activación de cuenta: ", e);
-            return AuthResponseDTO.error("Error al activar la cuenta: " + e.getMessage());
+            log.error("Error enviando email de bienvenida a {}: {}", user.getEmail(), e.getMessage());
+            // No lanzar excepción - la activación ya fue exitosa
+        }
+    }
+
+    // Métodos auxiliares
+    private void checkRateLimitOrThrow(Long userId, String tokenType) {
+        if (!tokenRedisService.canRequestToken(userId, tokenType)) {
+            throw new TooManyAttemptsException("Demasiadas solicitudes. Intenta en 1 hora", 3600);
+        }
+    }
+
+    private void sendActivationEmailOrThrow(User user, String code) {
+        try {
+            emailService.sendActivationEmail(user, code);
+            log.info("Email de activación enviado a: {}", user.getEmail());
+        } catch (Exception e) {
+            log.error("Error enviando email de activación: {}", e.getMessage());
+            throw new EmailServiceException("Error enviando el email de activación", e);
         }
     }
 
@@ -179,39 +254,26 @@ public class AuthServiceImpl implements AuthService {
         String normalizedEmail = email.toLowerCase().trim();
         log.info("Procesando reenvío de código de activación para email: {}", normalizedEmail);
 
-        try {
-            User user = userRepository.findByEmail(normalizedEmail)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+        User user = findUserByEmailOrThrow(normalizedEmail);
 
-            if (user.isEnabled()) {
-                return AuthResponseDTO.error("La cuenta ya está activada");
-            }
+        checkIfAccountAlreadyActive(user);
 
-            if (!tokenRedisService.canRequestToken(user.getId(), "activation")) {
-                return AuthResponseDTO.error("Demasiadas solicitudes. Intenta en 1 hora");
-            }
+        checkRateLimitOrThrow(user.getId(), "activation");
 
-            String newActivationCode = tokenRedisService.generateAndStoreActivationCode(user.getId());
-            log.info("Nuevo código de activación generado para usuario: {}", email);
+        String newActivationCode = tokenRedisService.generateAndStoreActivationCode(user.getId());
+        log.info("Nuevo código de activación generado para usuario: {}", email);
 
-            try {
-                emailService.sendActivationEmail(user, newActivationCode);
-                log.info("Nuevo email de activación enviado a: {}", user.getEmail());
-            } catch (Exception e) {
-                log.error("Error enviando nuevo email de activación a {}: {}",
-                        user.getEmail(), e.getMessage());
-                return AuthResponseDTO.error("Error enviando el email de activación");
-            }
+        sendActivationEmailOrThrow(user, newActivationCode);
 
-            return AuthResponseDTO.success("Nuevo código de activación enviado. Revisa tu email.");
+        log.info("Nuevo código de activación enviado para usuario: {}", email);
 
-        } catch (UsernameNotFoundException e) {
-            log.warn("Intento de reenvío con email no registrado: {}", normalizedEmail);
-            return AuthResponseDTO.error("Usuario no encontrado");
-        } catch (Exception e) {
-            log.error("Error en reenvío para email: {}, error: {}", normalizedEmail, e.getMessage());
-            return AuthResponseDTO.error("Error interno del servidor");
-        }
+        return AuthResponseDTO.success("Nuevo código de activación enviado. Revisa tu email.");
+
+    }
+
+    private User findUserByEmailOrThrow(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado con email: " + email));
     }
 
     // ============================================================================
@@ -223,41 +285,54 @@ public class AuthServiceImpl implements AuthService {
         String normalizedEmail = loginDTO.email().toLowerCase().trim();
         log.info("Procesando login para email: {}", normalizedEmail);
 
-        User user = userRepository.findByEmail(normalizedEmail)
-                .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+        User user = findUserByEmailOrThrow(normalizedEmail);
 
-        // Verificar bloqueo en Redis (prioridad sobre BD)
-        if (accountLockoutRedisService.isAccountLocked(user.getId())) {
-            Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
-            log.warn("Intento de login en cuenta bloqueada (Redis): {} - Tiempo restante: {} minutos",
-                    normalizedEmail, remainingTime.toMinutes());
-            throw new AccountLockedException(
-                    String.format("Cuenta temporalmente bloqueada. Intenta nuevamente en %d minutos",
-                            remainingTime.toMinutes()));
-        }
+        checkAccountLockout(user, normalizedEmail);
+        checkAccountActivated(user);
 
-        if (!user.isEnabled()) {
-            throw new AccountNotActivatedException("Cuenta no activada. Verifica tu email.");
-        }
-
-        if (!passwordEncoder.matches(loginDTO.password(), user.getPassword())) {
-            log.warn("Contraseña incorrecta para usuario: {}", normalizedEmail);
-            handleFailedLogin(user, normalizedEmail);
-            throw new BadCredentialsException("Email o contraseña incorrectos");
-        }
+        validatePasswordOrThrow(loginDTO.password(), user, normalizedEmail);
 
         // Autenticación exitosa
+        return createSuccessfulLoginResponse(user);
+    }
+
+    private AuthResponseDTO createSuccessfulLoginResponse(User user) {
         handleSuccessfulLogin(user);
         JwtSessionService.SessionTokens sessionTokens = createUserSession(user);
         logLoginSuccess(user, sessionTokens);
-
         UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
-
         return AuthResponseDTO.success(
                 sessionTokens.getAccessToken(),
                 sessionTokens.getRefreshToken(),
                 sessionTokens.getExpiresIn() * 1000,
                 userInfo);
+    }
+
+    private void validatePasswordOrThrow(String password, User user, String email) {
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            log.warn("Contraseña incorrecta para usuario: {}", email);
+            handleFailedLogin(user, email);
+            // handleFailedLogin ya lanza InvalidCredentialsException o
+            // BadCredentialsException
+        }
+    }
+
+    /**
+     * Verifica si la cuenta está bloqueada y lanza excepción si es necesario
+     */
+    private void checkAccountLockout(User user, String email) {
+        if (accountLockoutRedisService.isAccountLocked(user.getId())) {
+            Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
+            long remainingMinutes = remainingTime.toMinutes();
+
+            log.warn("Intento de login OAuth en cuenta bloqueada: {} - Tiempo restante: {} minutos",
+                    email, remainingMinutes);
+
+            throw new AccountLockedException(
+                    String.format("Cuenta temporalmente bloqueada. Intenta nuevamente en %d minutos",
+                            remainingMinutes),
+                    remainingMinutes);
+        }
     }
 
     @Override
@@ -290,90 +365,6 @@ public class AuthServiceImpl implements AuthService {
         } catch (Exception e) {
             log.error("Error en logout: {}", e.getMessage());
             SecurityContextHolder.clearContext();
-        }
-    }
-
-    @Override
-    public AuthResponseDTO loginWithGoogle(GoogleOAuthLoginDTO googleOAuthLoginDTO) {
-        log.info("Procesando login con Google OAuth");
-
-        try {
-            // Verificar el token de Google
-            com.google.api.client.googleapis.auth.oauth2.GoogleIdToken.Payload payload = googleOAuthService
-                    .verifyGoogleToken(googleOAuthLoginDTO.idToken());
-
-            String email = googleOAuthService.getEmail(payload);
-            String normalizedEmail = email.toLowerCase().trim();
-            Boolean emailVerified = googleOAuthService.isEmailVerified(payload);
-
-            log.info("Token de Google verificado para email: {}", normalizedEmail);
-
-            // Buscar o crear usuario
-            User user = userRepository.findByEmail(normalizedEmail)
-                    .orElseGet(() -> {
-                        log.info("Usuario no existe, creando nuevo usuario desde Google: {}", normalizedEmail);
-
-                        String givenName = googleOAuthService.getGivenName(payload);
-                        String familyName = googleOAuthService.getFamilyName(payload);
-
-                        User newUser = User.builder()
-                                .email(normalizedEmail)
-                                .name(givenName != null ? givenName : "Google")
-                                .lastName(familyName != null ? familyName : "User")
-                                .idNumber("GOOGLE-" + payload.getSubject()) // ID único de Google
-                                .password(passwordEncoder.encode(java.util.UUID.randomUUID().toString())) // Password
-                                                                                                          // aleatorio
-                                .role(EnumRole.USER)
-                                .status(EnumStatus.ACTIVE) // Activado automáticamente
-                                .emailVerified(emailVerified != null ? emailVerified : true) // Email verificado por
-                                                                                             // Google
-                                .phoneVerified(false)
-                                .build();
-
-                        return userRepository.save(newUser);
-                    });
-
-            // Verificar si la cuenta está habilitada
-            if (!user.isEnabled()) {
-                // Si el usuario existe pero no está activado, activarlo automáticamente
-                // ya que Google verificó el email
-                user.setStatus(EnumStatus.ACTIVE);
-                user.setEmailVerified(true);
-                user = userRepository.save(user);
-                log.info("Cuenta activada automáticamente por Google OAuth: {}", normalizedEmail);
-            }
-
-            // Verificar bloqueo
-            if (accountLockoutRedisService.isAccountLocked(user.getId())) {
-                Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
-                log.warn("Intento de login OAuth en cuenta bloqueada: {} - Tiempo restante: {} minutos",
-                        normalizedEmail, remainingTime.toMinutes());
-                throw new BadCredentialsException(
-                        String.format("Cuenta temporalmente bloqueada. Intenta nuevamente en %d minutos",
-                                remainingTime.toMinutes()));
-            }
-
-            // Autenticación exitosa
-            handleSuccessfulLogin(user);
-            JwtSessionService.SessionTokens sessionTokens = createUserSession(user);
-            logLoginSuccess(user, sessionTokens);
-
-            UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
-
-            return AuthResponseDTO.success(
-                    sessionTokens.getAccessToken(),
-                    sessionTokens.getRefreshToken(),
-                    sessionTokens.getExpiresIn() * 1000,
-                    userInfo);
-
-        } catch (IllegalArgumentException e) {
-            log.error("Token de Google inválido: {}", e.getMessage());
-            throw new BadCredentialsException("Token de Google inválido");
-        } catch (BadCredentialsException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("Error en login con Google: {}", e.getMessage(), e);
-            throw new RuntimeException("Error interno del servidor");
         }
     }
 
@@ -555,9 +546,7 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO forgotPassword(ForgotPasswordDTO forgotPasswordDTO) {
         String normalizedEmail = forgotPasswordDTO.email().toLowerCase().trim();
         try {
-            User user = userRepository.findByEmail(normalizedEmail)
-                    .orElseThrow(() -> new UsernameNotFoundException(
-                            "Usuario no encontrado con el email: " + normalizedEmail));
+            User user = findUserByEmailOrThrow(normalizedEmail);
 
             if (!tokenRedisService.canRequestToken(user.getId(), "reset")) {
                 return AuthResponseDTO.error("Demasiadas solicitudes. Intenta en 1 hora");

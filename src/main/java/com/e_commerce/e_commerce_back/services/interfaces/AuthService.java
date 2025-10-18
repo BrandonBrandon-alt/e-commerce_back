@@ -19,7 +19,7 @@ public interface AuthService {
      * @param googleOAuthLoginDTO Token de ID de Google
      * @return Respuesta con token y información del usuario
      */
-    AuthResponseDTO loginWithGoogle(GoogleOAuthLoginDTO googleOAuthLoginDTO);
+    //AuthResponseDTO loginWithGoogle(GoogleOAuthLoginDTO googleOAuthLoginDTO);
 
     /**
      * Registra un nuevo usuario

@@ -1,17 +1,14 @@
-/**
- * Cuenta no activada/verificada
- */
 package com.e_commerce.e_commerce_back.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
 /**
- * Cuenta no activada/verificada
+ * Usuario no tiene permisos suficientes
  */
 @ResponseStatus(HttpStatus.FORBIDDEN)
-public class AccountNotActivatedException extends AuthException {
-    public AccountNotActivatedException(String message) {
+public class InsufficientPermissionsException extends AuthException {
+    public InsufficientPermissionsException(String message) {
         super(message, HttpStatus.FORBIDDEN);
     }
 }
