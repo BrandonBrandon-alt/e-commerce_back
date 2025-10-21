@@ -10,6 +10,7 @@ import com.e_commerce.e_commerce_back.exception.EmailServiceException;
 import com.e_commerce.e_commerce_back.exception.IdNumberAlreadyExistsException;
 import com.e_commerce.e_commerce_back.exception.InvalidVerificationCodeException;
 import com.e_commerce.e_commerce_back.exception.TooManyAttemptsException;
+import com.e_commerce.e_commerce_back.exception.UnlockAccountException;
 import com.e_commerce.e_commerce_back.exception.UserNotFoundException;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
@@ -28,7 +29,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -57,6 +57,13 @@ public class AuthServiceImpl implements AuthService {
     private final JwtSessionService jwtSessionService;
     private final AccountLockoutRedisService accountLockoutRedisService;
 
+    private static final String MSG_UNLOCK_GENERIC = "Si el correo es válido y está bloqueado, recibirás un código";
+    private static final String MSG_UNLOCK_SENT = "Código de desbloqueo enviado a tu email";
+    private static final String MSG_UNLOCK_SUCCESS = "Cuenta desbloqueada exitosamente. Ya puedes iniciar sesión.";
+    private static final String MSG_UNLOCK_ALREADY = "La cuenta ya está desbloqueada";
+    private static final String MSG_RESET_GENERIC = "Si el correo es válido y está bloqueado, recibirás un código";
+    private static final String MSG_RESET_SENT = "Código de desbloqueo enviado a tu email";
+
     @Value("${app.jwt.expiration}")
     private Long jwtExpiration;
 
@@ -72,7 +79,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO register(RegisterUserDTO createUserDTO) {
-        String normalizedEmail = createUserDTO.email().toLowerCase().trim();
+        String normalizedEmail = normalizeEmail(createUserDTO.email());
         log.info("Procesando registro para email: {}", normalizedEmail);
 
         // Validaciones (lanza excepciones específicas)
@@ -91,45 +98,6 @@ public class AuthServiceImpl implements AuthService {
 
         return AuthResponseDTO.registered(
                 "Usuario registrado exitosamente. Revisa tu email para activar tu cuenta con el código de 6 dígitos.");
-    }
-
-    // Métodos auxiliares de register
-    private void validateEmailNotExists(String email) {
-        if (userRepository.existsByEmail(email)) {
-            throw new EmailAlreadyExistsException("El email ya está registrado");
-        }
-    }
-
-    private void validateIdNumberNotExists(String idNumber) {
-        if (userRepository.findByIdNumber(idNumber).isPresent()) {
-            throw new IdNumberAlreadyExistsException("El número de identificación ya está registrado");
-        }
-    }
-
-    private User buildNewUser(RegisterUserDTO dto, String normalizedEmail) {
-        return User.builder()
-                .idNumber(dto.idNumber())
-                .name(dto.name())
-                .lastName(dto.lastName())
-                .email(normalizedEmail)
-                .phoneNumber(dto.phoneNumber())
-                .password(passwordEncoder.encode(dto.password()))
-                .dateOfBirth(dto.dateOfBirth())
-                .role(EnumRole.USER)
-                .status(EnumStatus.INACTIVE)
-                .emailVerified(false)
-                .phoneVerified(false)
-                .build();
-    }
-
-    private void sendActivationEmail(User user, String code) {
-        try {
-            emailService.sendActivationEmail(user, code);
-            log.info("Email de activación enviado a: {}", user.getEmail());
-        } catch (Exception e) {
-            log.error("Error enviando email de activación a {}: {}", user.getEmail(), e.getMessage());
-            // No lanzar excepción - el usuario ya está registrado
-        }
     }
 
     @Override
@@ -155,6 +123,102 @@ public class AuthServiceImpl implements AuthService {
         log.info("Cuenta activada exitosamente para usuario ID: {} - Email: {}", userId, user.getEmail());
 
         return AuthResponseDTO.success("¡Cuenta activada exitosamente! Ya puedes iniciar sesión.");
+    }
+
+    @Override
+    public AuthResponseDTO resendActivationCode(String email) {
+        String normalizedEmail = normalizeEmail(email);
+        log.info("Procesando reenvío de código de activación para email: {}", normalizedEmail);
+
+        User user = findUserByEmailOrThrow(normalizedEmail);
+
+        checkIfAccountAlreadyActive(user);
+
+        checkRateLimitOrThrow(user.getId(), "activation");
+
+        String newActivationCode = tokenRedisService.generateAndStoreActivationCode(user.getId());
+        log.info("Nuevo código de activación generado para usuario: {}", email);
+
+        sendActivationEmailOrThrow(user, newActivationCode);
+
+        log.info("Nuevo código de activación enviado para usuario: {}", email);
+
+        return AuthResponseDTO.success("Nuevo código de activación enviado. Revisa tu email.");
+
+    }
+
+    // ============================================================================
+    // METODOS AUXILIARES REGISTRO Y ACTIVACIÓN
+    // ============================================================================
+
+    /**
+     * Metodo auxiliar para normalizar el email
+     * 
+     * @param email
+     */
+    private String normalizeEmail(String email) {
+        return email.toLowerCase().trim();
+    }
+
+    /**
+     * Metodo auxiliar para validar si el email ya existe
+     * 
+     * @param email
+     */
+    private void validateEmailNotExists(String email) {
+        if (userRepository.existsByEmail(email)) {
+            throw new EmailAlreadyExistsException("El email ya está registrado");
+        }
+    }
+
+    /**
+     * Metodo auxiliar para validar si el número de identificación ya existe
+     * 
+     * @param idNumber
+     */
+    private void validateIdNumberNotExists(String idNumber) {
+        if (userRepository.findByIdNumber(idNumber).isPresent()) {
+            throw new IdNumberAlreadyExistsException("El número de identificación ya está registrado");
+        }
+    }
+
+    /**
+     * Metodo auxiliar para crear un nuevo usuario
+     * 
+     * @param dto
+     * @param normalizedEmail
+     * @return
+     */
+    private User buildNewUser(RegisterUserDTO dto, String normalizedEmail) {
+        return User.builder()
+                .idNumber(dto.idNumber())
+                .name(dto.name())
+                .lastName(dto.lastName())
+                .email(normalizedEmail)
+                .phoneNumber(dto.phoneNumber())
+                .password(passwordEncoder.encode(dto.password()))
+                .dateOfBirth(dto.dateOfBirth())
+                .role(EnumRole.USER)
+                .status(EnumStatus.INACTIVE)
+                .emailVerified(false)
+                .phoneVerified(false)
+                .build();
+    }
+
+    /**
+     * Metodo auxiliar para enviar el email de activación
+     * 
+     * @param user
+     * @param code
+     */
+    private void sendActivationEmail(User user, String code) {
+        try {
+            emailService.sendActivationEmail(user, code);
+            log.info("Email de activación enviado a: {}", user.getEmail());
+        } catch (Exception e) {
+            log.error("Error enviando email de activación a {}: {}", user.getEmail(), e.getMessage());
+            // No lanzar excepción - el usuario ya está registrado
+        }
     }
 
     /**
@@ -189,12 +253,18 @@ public class AuthServiceImpl implements AuthService {
      * @throws AccountAlreadyActiveException si ya está activa
      */
     private void checkIfAccountAlreadyActive(User user) {
-        if (user.getStatus() == EnumStatus.ACTIVE && Boolean.TRUE.equals(user.getEmailVerified())) {
+        // Puedes usar el método que ya existe en User
+        if (user.isEnabled()) {
             log.info("La cuenta del usuario {} ya está activada", user.getEmail());
             throw new AccountAlreadyActiveException("La cuenta ya está activada");
         }
     }
 
+    /**
+     * Verifica si la cuenta está activada
+     * 
+     * @throws AccountNotActivatedException si no está activada
+     */
     private void checkAccountActivated(User user) {
         if (!user.isEnabled()) {
             throw new AccountNotActivatedException(
@@ -213,7 +283,6 @@ public class AuthServiceImpl implements AuthService {
         user.setEmailVerified(true);
 
         User savedUser = userRepository.save(user);
-        userRepository.flush();
 
         log.info("Estado después de activar - Status: {}, EmailVerified: {}, isEnabled: {}",
                 savedUser.getStatus(), savedUser.getEmailVerified(), savedUser.isEnabled());
@@ -232,45 +301,38 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
-    // Métodos auxiliares
+    /**
+     * Verifica si se ha excedido el límite de intentos
+     * 
+     * @throws TooManyAttemptsException si se ha excedido el límite
+     */
     private void checkRateLimitOrThrow(Long userId, String tokenType) {
         if (!tokenRedisService.canRequestToken(userId, tokenType)) {
             throw new TooManyAttemptsException("Demasiadas solicitudes. Intenta en 1 hora", 3600);
         }
     }
 
+    /**
+     * Envía email de activación
+     * 
+     * @throws EmailServiceException si hay error al enviar el email
+     */
     private void sendActivationEmailOrThrow(User user, String code) {
         try {
             emailService.sendActivationEmail(user, code);
             log.info("Email de activación enviado a: {}", user.getEmail());
         } catch (Exception e) {
-            log.error("Error enviando email de activación: {}", e.getMessage());
+            log.error("Error enviando email de activación a {}: {}",
+                    user.getEmail(), e.getMessage(), e); // ⭐ Agregar excepción completa
             throw new EmailServiceException("Error enviando el email de activación", e);
         }
     }
 
-    @Override
-    public AuthResponseDTO resendActivationCode(String email) {
-        String normalizedEmail = email.toLowerCase().trim();
-        log.info("Procesando reenvío de código de activación para email: {}", normalizedEmail);
-
-        User user = findUserByEmailOrThrow(normalizedEmail);
-
-        checkIfAccountAlreadyActive(user);
-
-        checkRateLimitOrThrow(user.getId(), "activation");
-
-        String newActivationCode = tokenRedisService.generateAndStoreActivationCode(user.getId());
-        log.info("Nuevo código de activación generado para usuario: {}", email);
-
-        sendActivationEmailOrThrow(user, newActivationCode);
-
-        log.info("Nuevo código de activación enviado para usuario: {}", email);
-
-        return AuthResponseDTO.success("Nuevo código de activación enviado. Revisa tu email.");
-
-    }
-
+    /**
+     * Busca un usuario por email
+     * 
+     * @throws UserNotFoundException si no se encuentra
+     */
     private User findUserByEmailOrThrow(String email) {
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado con email: " + email));
@@ -282,7 +344,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO login(LoginDTO loginDTO) {
-        String normalizedEmail = loginDTO.email().toLowerCase().trim();
+        String normalizedEmail = normalizeEmail(loginDTO.email());
         log.info("Procesando login para email: {}", normalizedEmail);
 
         User user = findUserByEmailOrThrow(normalizedEmail);
@@ -296,6 +358,78 @@ public class AuthServiceImpl implements AuthService {
         return createSuccessfulLoginResponse(user);
     }
 
+    @Override
+    public void logout(String authHeader) {
+        try {
+            String token = extractTokenFromHeader(authHeader);
+
+            if (!StringUtils.hasText(token)) {
+                log.info("Logout procesado sin token válido");
+                return;
+            }
+
+            processTokenLogout(token);
+
+        } catch (Exception e) {
+            log.error("Error inesperado en logout: {}", e.getMessage(), e);
+        } finally {
+            // Siempre limpiar el contexto de seguridad
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    // ============================================================================
+    // METODOS AUXILIARES LOGIN Y LOGOUT
+    // ============================================================================
+
+    /**
+     * Procesa el logout del token: cierra sesión o blacklist
+     */
+    private void processTokenLogout(String token) {
+        try {
+            String sessionId = jwtSessionService.findSessionIdByAccessToken(token);
+
+            if (sessionId != null) {
+                closeSessionGracefully(sessionId);
+            } else {
+                blacklistTokenWithLogging(token, "Sesión no encontrada");
+            }
+
+        } catch (Exception e) {
+            log.warn("Token inválido durante logout: {}", e.getMessage());
+            blacklistTokenWithLogging(token, "Token inválido");
+        }
+    }
+
+    /**
+     * Cierra sesión de forma segura
+     */
+    private void closeSessionGracefully(String sessionId) {
+        try {
+            jwtSessionService.closeSession(sessionId);
+            log.info("✓ Sesión cerrada exitosamente - SessionId: {}", sessionId);
+        } catch (Exception e) {
+            log.error("Error cerrando sesión {}: {}", sessionId, e.getMessage(), e);
+            // No relanzar - el logout debe completarse
+        }
+    }
+
+    /**
+     * Blacklistea token con logging apropiado
+     */
+    private void blacklistTokenWithLogging(String token, String reason) {
+        try {
+            jwtSessionService.blacklistAccessToken(token);
+            log.info("✓ Token blacklisted - Razón: {}", reason);
+        } catch (Exception e) {
+            log.error("Error blacklisteando token: {}", e.getMessage(), e);
+            // No relanzar - el logout debe completarse
+        }
+    }
+
+    /**
+     * Crea una respuesta exitosa para el login
+     */
     private AuthResponseDTO createSuccessfulLoginResponse(User user) {
         handleSuccessfulLogin(user);
         JwtSessionService.SessionTokens sessionTokens = createUserSession(user);
@@ -308,6 +442,9 @@ public class AuthServiceImpl implements AuthService {
                 userInfo);
     }
 
+    /**
+     * Valida la contraseña del usuario
+     */
     private void validatePasswordOrThrow(String password, User user, String email) {
         if (!passwordEncoder.matches(password, user.getPassword())) {
             log.warn("Contraseña incorrecta para usuario: {}", email);
@@ -335,78 +472,62 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
-    @Override
-    public void logout(String authHeader) {
-        try {
-            String token = extractTokenFromHeader(authHeader);
-
-            if (StringUtils.hasText(token)) {
-                try {
-                    String sessionId = jwtSessionService.findSessionIdByAccessToken(token);
-
-                    if (sessionId != null) {
-                        jwtSessionService.closeSession(sessionId);
-                        log.info("Sesión cerrada - SessionId: {}", sessionId);
-                    } else {
-                        jwtSessionService.blacklistAccessToken(token);
-                        log.info("Token blacklisted - Sesión no encontrada");
-                    }
-
-                } catch (Exception tokenException) {
-                    log.warn("Intento de logout con token inválido: {}", tokenException.getMessage());
-                    jwtSessionService.blacklistAccessToken(token);
-                }
-
-                SecurityContextHolder.clearContext();
-            } else {
-                log.info("Logout procesado sin token válido");
-            }
-
-        } catch (Exception e) {
-            log.error("Error en logout: {}", e.getMessage());
-            SecurityContextHolder.clearContext();
-        }
-    }
-
     // ============================================================================
     // MANEJO DE INTENTOS FALLIDOS
     // ============================================================================
 
     /**
-     * Maneja un intento de login fallido
-     * Usa Redis para el tracking de intentos y lanza la excepción apropiada
+     * Maneja un intento fallido de login registrando el intento y lanzando la
+     * excepción apropiada
      * 
      * @param user  Usuario que intentó hacer login
-     * @param email Email usado en el intento
-     * @throws BadCredentialsException con mensaje apropiado según el estado de
-     *                                 bloqueo
+     * @param email Email usado en el intento (para logging)
+     * @throws AccountLockedException  si la cuenta está bloqueada
+     * @throws BadCredentialsException si las credenciales son incorrectas
      */
     private void handleFailedLogin(User user, String email) {
         log.warn("Intento fallido de login para usuario: {}", email);
 
-        // Registrar intento fallido en Redis (esto puede bloquear la cuenta
-        // automáticamente)
-        int failedAttempts = accountLockoutRedisService.recordFailedAttempt(user.getId());
+        Long userId = user.getId();
+        int failedAttempts = accountLockoutRedisService.recordFailedAttempt(userId);
 
-        // Verificar si la cuenta se bloqueó después de registrar el intento
-        if (accountLockoutRedisService.isAccountLocked(user.getId())) {
-            Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
-            log.error("Cuenta bloqueada en Redis para usuario: {} - Intentos: {} - Tiempo restante: {} minutos",
-                    email, failedAttempts, remainingTime.toMinutes());
+        // Verificar bloqueo y lanzar excepción si aplica
+        checkAccountLockoutAndThrow(userId, email, failedAttempts);
 
-            throw new BadCredentialsException(
-                    String.format("Cuenta bloqueada por %d minutos debido a múltiples intentos fallidos",
-                            remainingTime.toMinutes()));
+        // Si llegamos aquí, no está bloqueada - informar intentos restantes
+        throwBadCredentialsWithRemainingAttempts(userId, failedAttempts);
+    }
+
+    /**
+     * Verifica si la cuenta está bloqueada y lanza excepción correspondiente
+     */
+    private void checkAccountLockoutAndThrow(Long userId, String email, int failedAttempts) {
+        if (!accountLockoutRedisService.isAccountLocked(userId)) {
+            return; // No está bloqueada, continuar
         }
 
-        // Si no está bloqueada, informar intentos restantes
-        int remainingAttempts = accountLockoutRedisService.getRemainingAttempts(user.getId());
+        Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(userId);
+        long minutes = remainingTime.toMinutes();
+
+        log.error("Cuenta bloqueada - Usuario: {} - Intentos: {} - Tiempo restante: {} min",
+                email, failedAttempts, minutes);
+
+        throw new AccountLockedException(
+                String.format("Cuenta bloqueada por %d minutos debido a múltiples intentos fallidos", minutes),
+                minutes);
+    }
+
+    /**
+     * Lanza excepción de credenciales incorrectas con intentos restantes
+     */
+    private void throwBadCredentialsWithRemainingAttempts(Long userId, int failedAttempts) {
+        int remainingAttempts = accountLockoutRedisService.getRemainingAttempts(userId);
+
         log.warn("Credenciales inválidas - Intentos fallidos: {} - Restantes: {}",
                 failedAttempts, remainingAttempts);
 
         throw new BadCredentialsException(
-                String.format("Email o contraseña incorrectos. Intentos restantes: %d",
-                        remainingAttempts));
+                String.format("Email o contraseña incorrectos. Intentos restantes: %d", remainingAttempts));
     }
 
     /**
@@ -423,62 +544,50 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
     }
 
-    /**
-     * @deprecated Usar accountLockoutRedisService.recordFailedAttempt() en su lugar
-     *             Mantenido para compatibilidad temporal
-     */
-    @Deprecated
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void incrementFailedAttemptsInNewTransaction(Long userId, String email) {
-        log.warn("DEPRECADO: incrementFailedAttemptsInNewTransaction - usar AccountLockoutRedisService");
-        // Delegar a Redis
-        accountLockoutRedisService.recordFailedAttempt(userId);
-    }
-
-    /**
-     * @deprecated Usar accountLockoutRedisService.resetFailedAttempts() en su lugar
-     *             Mantenido para compatibilidad temporal
-     */
-    @Deprecated
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void resetFailedAttemptsInNewTransaction(Long userId) {
-        log.warn("DEPRECADO: resetFailedAttemptsInNewTransaction - usar AccountLockoutRedisService");
-        // Delegar a Redis
-        accountLockoutRedisService.resetFailedAttempts(userId);
-    }
-
     // ============================================================================
-    // DESBLOQUEO DE CUENTA
+    // DESBLOQUEO INMEDIATO - OPTIMIZADO
     // ============================================================================
 
     @Override
     public AuthResponseDTO requestImmediateUnlock(RequestImmediateUnlockDTO requestImmediateUnlockDTO) {
-        String normalizedEmail = requestImmediateUnlockDTO.email().toLowerCase().trim();
+        String normalizedEmail = normalizeEmail(requestImmediateUnlockDTO.email());
+
+        // Buscar usuario - retornar mensaje genérico si no existe (seguridad)
+        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+        if (user == null) {
+            log.info("Intento de desbloqueo con email no registrado: {}", normalizedEmail);
+            return AuthResponseDTO.success(MSG_UNLOCK_GENERIC);
+        }
+
+        // Verificar si está bloqueado
+        if (!accountLockoutRedisService.isAccountLocked(user.getId())) {
+            log.info("Intento de desbloqueo de cuenta no bloqueada: {}", normalizedEmail);
+            return AuthResponseDTO.success(MSG_UNLOCK_GENERIC);
+        }
+
+        // Verificar rate limit
+        checkRateLimitOrThrow(user.getId(), "unlock");
+
+        // Generar y enviar código
+        String unlockCode = tokenRedisService.generateAndStoreUnlockCode(user.getId());
+        sendUnlockCodeOrThrow(user, unlockCode);
+
+        log.info("Código de desbloqueo enviado a usuario: {}", user.getEmail());
+        return AuthResponseDTO.success(MSG_UNLOCK_SENT);
+    }
+
+    /**
+     * Envía código de desbloqueo
+     * 
+     * @throws EmailServiceException si hay error al enviar el email
+     */
+    private void sendUnlockCodeOrThrow(User user, String code) {
         try {
-            User user = userRepository.findByEmail(normalizedEmail).orElse(null);
-
-            if (user == null) {
-                return AuthResponseDTO.success("Si el correo es válido y está bloqueado, recibirás un código");
-            }
-
-            // Verificar si está bloqueado en Redis
-            if (!accountLockoutRedisService.isAccountLocked(user.getId())) {
-                return AuthResponseDTO.success("Si el correo es válido y está bloqueado, recibirás un código");
-            }
-
-            if (!tokenRedisService.canRequestToken(user.getId(), "unlock")) {
-                return AuthResponseDTO.error("Demasiadas solicitudes. Intenta en 1 hora");
-            }
-
-            String unlockCode = tokenRedisService.generateAndStoreUnlockCode(user.getId());
-            emailService.sendUnlockCode(user, unlockCode);
-
-            log.info("Unlock code sent to user: {}", user.getEmail());
-            return AuthResponseDTO.success("Código de desbloqueo enviado a tu email");
-
+            emailService.sendUnlockCode(user, code);
+            log.info("Email de desbloqueo enviado a: {}", user.getEmail());
         } catch (Exception e) {
-            log.error("Error al solicitar desbloqueo inmediato: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error al enviar el código");
+            log.error("Error enviando email de desbloqueo a {}: {}", user.getEmail(), e.getMessage(), e);
+            throw new EmailServiceException("Error enviando el código de desbloqueo", e);
         }
     }
 
@@ -487,50 +596,74 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO verifyUnlockCode(VerifyUnlockCodeDTO verifyUnlockCodeDTO) {
         log.info("Procesando verificación de código de desbloqueo");
 
+        // Verificar y consumir código
+        Long userId = verifyUnlockCodeOrThrow(verifyUnlockCodeDTO.code());
+
+        // Buscar usuario
+        User user = findUserByIdOrThrow(userId);
+
+        // Verificar si ya está desbloqueada
+        if (!accountLockoutRedisService.isAccountLocked(userId)) {
+            log.info("La cuenta del usuario {} ya está desbloqueada", user.getEmail());
+            return AuthResponseDTO.success(MSG_UNLOCK_ALREADY);
+        }
+
+        // Desbloquear cuenta
+        unlockUserAccount(userId, user.getEmail());
+
+        // Enviar email de confirmación (no crítico)
+        sendAccountUnlockedEmailSafely(user);
+
+        return AuthResponseDTO.success(MSG_UNLOCK_SUCCESS);
+    }
+
+    /**
+     * Verifica el código de desbloqueo y lo consume
+     * 
+     * @throws InvalidVerificationCodeException si el código es inválido o expirado
+     */
+    private Long verifyUnlockCodeOrThrow(String unlockCode) {
+        Long userId = tokenRedisService.verifyAndConsumeUnlockCode(unlockCode);
+
+        if (userId == null) {
+            log.warn("Código de desbloqueo inválido o expirado");
+            throw new InvalidVerificationCodeException("Código de desbloqueo incorrecto o expirado");
+        }
+
+        return userId;
+    }
+
+    /**
+     * Desbloquea la cuenta del usuario en Redis
+     */
+    private void unlockUserAccount(Long userId, String email) {
         try {
-            Long userId = tokenRedisService.verifyAndConsumeUnlockCode(verifyUnlockCodeDTO.code());
-
-            if (userId == null) {
-                log.warn("Código de desbloqueo inválido o expirado");
-                return AuthResponseDTO.error("Código de desbloqueo incorrecto o expirado");
-            }
-
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado con ID: " + userId));
-
-            // Verificar bloqueo en Redis
-            if (!accountLockoutRedisService.isAccountLocked(userId)) {
-                log.info("La cuenta del usuario {} no está bloqueada en Redis", user.getEmail());
-                return AuthResponseDTO.success("La cuenta ya está desbloqueada");
-            }
-
-            // Desbloquear en Redis
             accountLockoutRedisService.unlockAccount(userId);
-
-            log.info("Cuenta desbloqueada exitosamente para usuario: {} - Email: {}", userId, user.getEmail());
-
-            try {
-                emailService.sendAccountUnlockedEmail(user);
-            } catch (Exception e) {
-                log.warn("Error enviando email de confirmación de desbloqueo: {}", e.getMessage());
-            }
-
-            return AuthResponseDTO.success("Cuenta desbloqueada exitosamente. Ya puedes iniciar sesión.");
-
-        } catch (UsernameNotFoundException e) {
-            log.error("Usuario no encontrado: {}", e.getMessage());
-            return AuthResponseDTO.error("Usuario no encontrado");
+            log.info("✓ Cuenta desbloqueada exitosamente - UserId: {} - Email: {}", userId, email);
         } catch (Exception e) {
-            log.error("Error al verificar código de desbloqueo: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error al verificar el código");
+            log.error("Error desbloqueando cuenta {}: {}", userId, e.getMessage(), e);
+            throw new UnlockAccountException("Error al desbloquear la cuenta", e);
+        }
+    }
+
+    /**
+     * Envía email de confirmación de desbloqueo sin lanzar excepción si falla
+     */
+    private void sendAccountUnlockedEmailSafely(User user) {
+        try {
+            emailService.sendAccountUnlockedEmail(user);
+            log.info("Email de confirmación de desbloqueo enviado a: {}", user.getEmail());
+        } catch (Exception e) {
+            log.warn("Error enviando email de confirmación de desbloqueo a {}: {}",
+                    user.getEmail(), e.getMessage());
+            // No lanzar excepción - el desbloqueo ya fue exitoso
         }
     }
 
     @Transactional
     public void unlockUserAccount(String email) {
-        String normalizedEmail = email.toLowerCase().trim();
-        User user = userRepository.findByEmail(normalizedEmail)
-                .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
+        String normalizedEmail = normalizeEmail(email);
+        User user = findUserByEmailOrThrow(normalizedEmail);
 
         // Desbloquear en Redis
         accountLockoutRedisService.unlockAccount(user.getId());
@@ -544,27 +677,45 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO forgotPassword(ForgotPasswordDTO forgotPasswordDTO) {
-        String normalizedEmail = forgotPasswordDTO.email().toLowerCase().trim();
+        String normalizedEmail = normalizeEmail(forgotPasswordDTO.email());
+
+        // Buscar usuario - retornar mensaje genérico si no existe (seguridad)
+        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+
+        if (user == null) {
+            log.info("Intento de reset para email no registrado: {}", normalizedEmail);
+            return AuthResponseDTO.success(MSG_RESET_GENERIC);
+        }
+
+        // Verificar rate limit
+        checkRateLimitOrThrow(user.getId(), "reset");
+
+        // Generar y enviar código
+        String resetCode = tokenRedisService.generateAndStoreResetCode(user.getId());
+        sendPasswordResetEmailOrThrow(user, resetCode);
+
+        log.info("Código de reset enviado a: {}", normalizedEmail);
+        return AuthResponseDTO.success(MSG_RESET_SENT);
+    }
+
+    /**
+     * Envía email de reseteo de contraseña
+     * 
+     * @throws EmailServiceException si hay error al enviar el email
+     */
+    private void sendPasswordResetEmailOrThrow(User user, String code) {
         try {
-            User user = findUserByEmailOrThrow(normalizedEmail);
-
-            if (!tokenRedisService.canRequestToken(user.getId(), "reset")) {
-                return AuthResponseDTO.error("Demasiadas solicitudes. Intenta en 1 hora");
-            }
-
-            String resetCode = tokenRedisService.generateAndStoreResetCode(user.getId());
-            emailService.sendPasswordResetEmail(user, resetCode);
-
-            log.info("Código de reseteo de contraseña enviado a: {}", normalizedEmail);
-            return AuthResponseDTO.success("Se ha enviado un código de reseteo a tu correo electrónico.");
-
-        } catch (UsernameNotFoundException e) {
-            log.warn("Intento de reseteo de contraseña para email no registrado: {}", normalizedEmail);
-            return AuthResponseDTO.success("Si tu correo está registrado, recibirás un código de reseteo.");
+            emailService.sendPasswordResetEmail(user, code);
+            log.info("Email de reset enviado a: {}", user.getEmail());
         } catch (Exception e) {
-            log.error("Error al procesar la solicitud de olvido de contraseña para {}: {}", normalizedEmail,
-                    e.getMessage());
-            return AuthResponseDTO.error("Error interno del servidor al intentar resetear la contraseña.");
+            log.error("Error enviando email de reset a {}: {}", user.getEmail(), e.getMessage(), e);
+            throw new EmailServiceException("Error enviando el código de reseteo", e);
+        }
+    }
+
+    private void verifyPasswordMatchOrThrow(ResetPasswordDTO resetPasswordDTO) {
+        if (!resetPasswordDTO.passwordsMatch()) {
+            throw new InvalidVerificationCodeException("Las contraseñas no coinciden");
         }
     }
 
@@ -574,23 +725,11 @@ public class AuthServiceImpl implements AuthService {
         log.info("Procesando reseteo de contraseña");
 
         try {
-            Long userId = tokenRedisService.verifyAndConsumeResetCode(resetPasswordDTO.resetCode());
+            Long userId = verifyResetCodeOrThrow(resetPasswordDTO.resetCode());
 
-            if (userId == null) {
-                log.warn("Código de reset inválido o expirado");
-                return AuthResponseDTO.error("Código de reset incorrecto o expirado");
-            }
+            User user = findUserByIdOrThrow(userId);
 
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado con ID: " + userId));
-
-            if (!resetPasswordDTO.passwordsMatch()) {
-                return AuthResponseDTO.error("Las contraseñas no coinciden");
-            }
-
-            if (resetPasswordDTO.password().length() < 8) {
-                return AuthResponseDTO.error("La contraseña debe tener al menos 8 caracteres");
-            }
+            verifyPasswordMatchOrThrow(resetPasswordDTO);
 
             user.setPassword(passwordEncoder.encode(resetPasswordDTO.password()));
             user.setPasswordChangedAt(LocalDateTime.now());
@@ -615,6 +754,22 @@ public class AuthServiceImpl implements AuthService {
             log.error("Error al restablecer contraseña: {}", e.getMessage(), e);
             return AuthResponseDTO.error("Error interno del servidor");
         }
+    }
+
+    /**
+     * Verifica el código de reseteo y lo consume
+     * 
+     * @throws InvalidVerificationCodeException si el código es inválido o expirado
+     */
+    private Long verifyResetCodeOrThrow(String resetCode) {
+        Long userId = tokenRedisService.verifyAndConsumeResetCode(resetCode);
+
+        if (userId == null) {
+            log.warn("Código de reseteo inválido o expirado");
+            throw new InvalidVerificationCodeException("Código de reseteo incorrecto o expirado");
+        }
+
+        return userId;
     }
 
     @Override

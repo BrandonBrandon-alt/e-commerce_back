@@ -115,6 +115,60 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Maneja errores al desbloquear cuenta
+     */
+    @ExceptionHandler(UnlockAccountException.class)
+    public ResponseEntity<Map<String, Object>> handleUnlockAccountException(
+            UnlockAccountException ex, WebRequest request) {
+        log.error("Error desbloqueando cuenta: {}", ex.getMessage(), ex);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
+        response.put("error", "Unlock Account Error");
+        response.put("message", "Error al desbloquear la cuenta. Intenta nuevamente.");
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+    }
+
+    /**
+     * Maneja errores al enviar emails (OPCIONAL - si aún no existe)
+     */
+    @ExceptionHandler(EmailServiceException.class)
+    public ResponseEntity<Map<String, Object>> handleEmailServiceException(
+            EmailServiceException ex, WebRequest request) {
+        log.error("Error enviando email: {}", ex.getMessage(), ex);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.SERVICE_UNAVAILABLE.value());
+        response.put("error", "Email Service Error");
+        response.put("message", "Error al enviar el email. Intenta nuevamente.");
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+    }
+
+    /**
+     * Maneja cuenta ya activada (OPCIONAL - si no existe)
+     */
+    @ExceptionHandler(AccountAlreadyActiveException.class)
+    public ResponseEntity<Map<String, Object>> handleAccountAlreadyActive(
+            AccountAlreadyActiveException ex, WebRequest request) {
+        log.info("Intento de activar cuenta ya activa: {}", ex.getMessage());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.CONFLICT.value());
+        response.put("error", "Account Already Active");
+        response.put("message", ex.getMessage());
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    /**
      * Maneja demasiados intentos (rate limiting)
      */
     @ExceptionHandler(TooManyAttemptsException.class)
