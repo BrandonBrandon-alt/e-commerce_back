@@ -133,19 +133,36 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Maneja errores al enviar emails (OPCIONAL - si aún no existe)
+     * Maneja errores al enviar emails
      */
     @ExceptionHandler(EmailServiceException.class)
     public ResponseEntity<Map<String, Object>> handleEmailServiceException(
             EmailServiceException ex, WebRequest request) {
         log.error("Error enviando email: {}", ex.getMessage(), ex);
+        
+        String path = request.getDescription(false).replace("uri=", "");
+        String message;
+        
+        // Mensaje específico según el contexto
+        if (path.contains("/forgot-password") || path.contains("/resend-reset-code")) {
+            message = "No pudimos enviar el código de reseteo a tu email. " +
+                    "Verifica que tu correo sea válido o intenta más tarde.";
+        } else if (path.contains("/register") || path.contains("/resend-activation-code")) {
+            message = "No pudimos enviar el código de activación a tu email. " +
+                    "Verifica que tu correo sea válido o intenta más tarde.";
+        } else if (path.contains("/request-unlock")) {
+            message = "No pudimos enviar el código de desbloqueo a tu email. " +
+                    "Verifica que tu correo sea válido o intenta más tarde.";
+        } else {
+            message = "Error al enviar el email. Por favor intenta nuevamente.";
+        }
 
         Map<String, Object> response = new HashMap<>();
         response.put("timestamp", LocalDateTime.now());
         response.put("status", HttpStatus.SERVICE_UNAVAILABLE.value());
         response.put("error", "Email Service Error");
-        response.put("message", "Error al enviar el email. Intenta nuevamente.");
-        response.put("path", request.getDescription(false).replace("uri=", ""));
+        response.put("message", message);
+        response.put("path", path);
 
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
     }
@@ -175,17 +192,34 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleTooManyAttempts(
             TooManyAttemptsException ex, WebRequest request) {
         log.warn("Too many attempts: {}", ex.getMessage());
+        
+        String path = request.getDescription(false).replace("uri=", "");
+        long retryAfter = ex.getRetryAfterSeconds();
+        long minutes = retryAfter / 60;
+        
+        // Mensaje específico según el contexto
+        String message;
+        if (path.contains("/forgot-password") || path.contains("/resend-reset-code")) {
+            message = String.format("Has solicitado demasiados códigos de reseteo. " +
+                    "Por favor espera %d minutos antes de intentar nuevamente.", minutes);
+        } else if (path.contains("/resend-activation-code")) {
+            message = String.format("Has solicitado demasiados códigos de activación. " +
+                    "Por favor espera %d minutos antes de intentar nuevamente.", minutes);
+        } else {
+            message = ex.getMessage();
+        }
 
         Map<String, Object> response = new HashMap<>();
         response.put("timestamp", LocalDateTime.now());
         response.put("status", HttpStatus.TOO_MANY_REQUESTS.value());
         response.put("error", "Too Many Requests");
-        response.put("message", ex.getMessage());
-        response.put("retryAfterSeconds", ex.getRetryAfterSeconds());
-        response.put("path", request.getDescription(false).replace("uri=", ""));
+        response.put("message", message);
+        response.put("retryAfterSeconds", retryAfter);
+        response.put("retryAfterMinutes", minutes);
+        response.put("path", path);
 
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .header("Retry-After", String.valueOf(retryAfter))
                 .body(response);
     }
 
@@ -268,6 +302,183 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleInvalidVerificationCode(
             InvalidVerificationCodeException ex, WebRequest request) {
         log.warn("Invalid verification code: {}", ex.getMessage());
+        
+        String path = request.getDescription(false).replace("uri=", "");
+        String message;
+        
+        // Mensaje específico según el contexto
+        if (path.contains("/reset-password")) {
+            message = "El código de reseteo es incorrecto o ha expirado. " +
+                    "Por favor solicita un nuevo código.";
+        } else if (path.contains("/activate-account")) {
+            message = "El código de activación es incorrecto o ha expirado. " +
+                    "Por favor solicita un nuevo código.";
+        } else if (path.contains("/verify-unlock-code")) {
+            message = "El código de desbloqueo es incorrecto o ha expirado. " +
+                    "Por favor solicita un nuevo código.";
+        } else if (path.contains("/verify-email-change")) {
+            message = "El código de verificación es incorrecto o ha expirado. " +
+                    "Por favor solicita un nuevo código.";
+        } else {
+            message = ex.getMessage();
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Bad Request");
+        response.put("message", message);
+        response.put("path", path);
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    /**
+     * Maneja usuario no encontrado (NUEVA - reemplaza UsernameNotFoundException)
+     */
+    @ExceptionHandler(UserNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleUserNotFound(
+            UserNotFoundException ex, WebRequest request) {
+        log.warn("User not found: {}", ex.getMessage());
+        
+        String path = request.getDescription(false).replace("uri=", "");
+        String message;
+        
+        // Mensaje específico según el contexto
+        if (path.contains("/forgot-password") || path.contains("/reset-password")) {
+            message = "El correo electrónico no está registrado en el sistema";
+        } else {
+            // Para login y otros contextos, no revelar si el usuario existe
+            message = "Email o contraseña incorrectos";
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.NOT_FOUND.value());
+        response.put("error", "Not Found");
+        response.put("message", message);
+        response.put("path", path);
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
+    
+    /**
+     * Maneja forgot password con mensaje genérico por seguridad
+     * Retorna 200 con mensaje genérico para no revelar si el email existe
+     */
+    @ExceptionHandler(ForgotPasswordException.class)
+    public ResponseEntity<Map<String, Object>> handleForgotPassword(
+            ForgotPasswordException ex, WebRequest request) {
+        log.info("Forgot password request for non-existent email (security): {}", 
+                request.getDescription(false));
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.OK.value());
+        response.put("success", true);
+        response.put("message", ex.getMessage());
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Maneja contraseñas que no coinciden
+     */
+    @ExceptionHandler(PasswordMismatchException.class)
+    public ResponseEntity<Map<String, Object>> handlePasswordMismatch(
+            PasswordMismatchException ex, WebRequest request) {
+        log.warn("Password mismatch: {}", ex.getMessage());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Bad Request");
+        response.put("message", ex.getMessage());
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+    
+    /**
+     * Maneja contraseña débil
+     */
+    @ExceptionHandler(WeakPasswordException.class)
+    public ResponseEntity<Map<String, Object>> handleWeakPassword(
+            WeakPasswordException ex, WebRequest request) {
+        log.warn("Weak password: {}", ex.getMessage());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Bad Request");
+        response.put("message", ex.getMessage());
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+    
+    /**
+     * Maneja cuenta deshabilitada
+     */
+    @ExceptionHandler(AccountDisabledException.class)
+    public ResponseEntity<Map<String, Object>> handleAccountDisabled(
+            AccountDisabledException ex, WebRequest request) {
+        log.warn("Account disabled: {}", ex.getMessage());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.FORBIDDEN.value());
+        response.put("error", "Forbidden");
+        response.put("message", ex.getMessage());
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+    }
+    
+    /**
+     * Maneja emails que no coinciden
+     */
+    @ExceptionHandler(EmailMismatchException.class)
+    public ResponseEntity<Map<String, Object>> handleEmailMismatch(
+            EmailMismatchException ex, WebRequest request) {
+        log.warn("Email mismatch: {}", ex.getMessage());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Bad Request");
+        response.put("message", ex.getMessage());
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+    
+    /**
+     * Maneja entrada inválida
+     */
+    @ExceptionHandler(InvalidInputException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidInput(
+            InvalidInputException ex, WebRequest request) {
+        log.warn("Invalid input: {}", ex.getMessage());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("error", "Bad Request");
+        response.put("message", ex.getMessage());
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+    
+    /**
+     * Maneja refresh token inválido
+     */
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidRefreshToken(
+            InvalidRefreshTokenException ex, WebRequest request) {
+        log.warn("Invalid refresh token: {}", ex.getMessage());
 
         Map<String, Object> response = new HashMap<>();
         response.put("timestamp", LocalDateTime.now());
@@ -278,21 +489,38 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
-
+    
     /**
-     * Maneja usuario no encontrado (NUEVA - reemplaza UsernameNotFoundException)
+     * Maneja token inválido
      */
-    @ExceptionHandler(UserNotFoundException.class)
-    public ResponseEntity<Map<String, Object>> handleUserNotFound(
-            UserNotFoundException ex, WebRequest request) {
-        log.warn("User not found: {}", ex.getMessage());
+    @ExceptionHandler(InvalidTokenException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidToken(
+            InvalidTokenException ex, WebRequest request) {
+        log.warn("Invalid token: {}", ex.getMessage());
 
-        // Por seguridad, no revelar si el usuario existe o no
         Map<String, Object> response = new HashMap<>();
         response.put("timestamp", LocalDateTime.now());
         response.put("status", HttpStatus.UNAUTHORIZED.value());
         response.put("error", "Unauthorized");
-        response.put("message", "Incorrect email or password");
+        response.put("message", ex.getMessage());
+        response.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+    }
+    
+    /**
+     * Maneja sesión inválida
+     */
+    @ExceptionHandler(InvalidSessionException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidSession(
+            InvalidSessionException ex, WebRequest request) {
+        log.warn("Invalid session: {}", ex.getMessage());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now());
+        response.put("status", HttpStatus.UNAUTHORIZED.value());
+        response.put("error", "Unauthorized");
+        response.put("message", ex.getMessage());
         response.put("path", request.getDescription(false).replace("uri=", ""));
 
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);

@@ -3,15 +3,23 @@ package com.e_commerce.e_commerce_back.services.implementation;
 import com.e_commerce.e_commerce_back.dto.*;
 import com.e_commerce.e_commerce_back.entity.User;
 import com.e_commerce.e_commerce_back.exception.AccountAlreadyActiveException;
+import com.e_commerce.e_commerce_back.exception.AccountDisabledException;
 import com.e_commerce.e_commerce_back.exception.AccountLockedException;
 import com.e_commerce.e_commerce_back.exception.AccountNotActivatedException;
 import com.e_commerce.e_commerce_back.exception.EmailAlreadyExistsException;
+import com.e_commerce.e_commerce_back.exception.EmailMismatchException;
 import com.e_commerce.e_commerce_back.exception.EmailServiceException;
 import com.e_commerce.e_commerce_back.exception.IdNumberAlreadyExistsException;
+import com.e_commerce.e_commerce_back.exception.InvalidCredentialsException;
+import com.e_commerce.e_commerce_back.exception.InvalidInputException;
+import com.e_commerce.e_commerce_back.exception.InvalidRefreshTokenException;
+import com.e_commerce.e_commerce_back.exception.InvalidTokenException;
 import com.e_commerce.e_commerce_back.exception.InvalidVerificationCodeException;
+import com.e_commerce.e_commerce_back.exception.PasswordMismatchException;
 import com.e_commerce.e_commerce_back.exception.TooManyAttemptsException;
 import com.e_commerce.e_commerce_back.exception.UnlockAccountException;
 import com.e_commerce.e_commerce_back.exception.UserNotFoundException;
+import com.e_commerce.e_commerce_back.exception.WeakPasswordException;
 import com.e_commerce.e_commerce_back.repository.UserRepository;
 import com.e_commerce.e_commerce_back.security.JwtUtil;
 import com.e_commerce.e_commerce_back.services.interfaces.AuthService;
@@ -26,7 +34,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,8 +68,7 @@ public class AuthServiceImpl implements AuthService {
     private static final String MSG_UNLOCK_SENT = "Código de desbloqueo enviado a tu email";
     private static final String MSG_UNLOCK_SUCCESS = "Cuenta desbloqueada exitosamente. Ya puedes iniciar sesión.";
     private static final String MSG_UNLOCK_ALREADY = "La cuenta ya está desbloqueada";
-    private static final String MSG_RESET_GENERIC = "Si el correo es válido y está bloqueado, recibirás un código";
-    private static final String MSG_RESET_SENT = "Código de desbloqueo enviado a tu email";
+    private static final String MSG_RESET_SENT = "Código de reseteo enviado a tu email. Revisa tu bandeja de entrada.";
 
     @Value("${app.jwt.expiration}")
     private Long jwtExpiration;
@@ -679,13 +685,8 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO forgotPassword(ForgotPasswordDTO forgotPasswordDTO) {
         String normalizedEmail = normalizeEmail(forgotPasswordDTO.email());
 
-        // Buscar usuario - retornar mensaje genérico si no existe (seguridad)
-        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
-
-        if (user == null) {
-            log.info("Intento de reset para email no registrado: {}", normalizedEmail);
-            return AuthResponseDTO.success(MSG_RESET_GENERIC);
-        }
+        // Buscar usuario - lanzar excepción si no existe
+        User user = findUserByEmailOrThrow(normalizedEmail);
 
         // Verificar rate limit
         checkRateLimitOrThrow(user.getId(), "reset");
@@ -724,36 +725,17 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO resetPassword(ResetPasswordDTO resetPasswordDTO) {
         log.info("Procesando reseteo de contraseña");
 
-        try {
-            Long userId = verifyResetCodeOrThrow(resetPasswordDTO.resetCode());
-
-            User user = findUserByIdOrThrow(userId);
-
-            verifyPasswordMatchOrThrow(resetPasswordDTO);
-
-            user.setPassword(passwordEncoder.encode(resetPasswordDTO.password()));
-            user.setPasswordChangedAt(LocalDateTime.now());
-
-            userRepository.save(user);
-
-            log.info("Contraseña restablecida exitosamente para usuario ID: {} - Email: {}",
-                    userId, user.getEmail());
-
-            try {
-                emailService.sendPasswordChangedConfirmationEmail(user);
-            } catch (Exception e) {
-                log.warn("Error enviando email de confirmación de cambio de contraseña: {}", e.getMessage());
-            }
-
-            return AuthResponseDTO.success("Contraseña restablecida exitosamente. Ya puedes iniciar sesión.");
-
-        } catch (UsernameNotFoundException e) {
-            log.error("Usuario no encontrado al resetear contraseña: {}", e.getMessage());
-            return AuthResponseDTO.error("Usuario no encontrado");
-        } catch (Exception e) {
-            log.error("Error al restablecer contraseña: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error interno del servidor");
-        }
+        Long userId = verifyResetCodeOrThrow(resetPasswordDTO.resetCode());
+        User user = findUserByIdOrThrow(userId);
+        
+        verifyPasswordMatchOrThrow(resetPasswordDTO);
+        
+        updateUserPassword(user, resetPasswordDTO.password());
+        sendPasswordChangedEmailSafely(user);
+        
+        log.info("Contraseña restablecida exitosamente para usuario ID: {} - Email: {}", userId, user.getEmail());
+        
+        return AuthResponseDTO.success("Contraseña restablecida exitosamente. Ya puedes iniciar sesión.");
     }
 
     /**
@@ -774,118 +756,221 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO resendResetCode(ResendresetCodeDTO resendresetCodeDTO) {
-        String normalizedEmail = resendresetCodeDTO.email().toLowerCase().trim();
+        String normalizedEmail = normalizeEmail(resendresetCodeDTO.email());
         log.info("Procesando reenvío de código de reseteo para email: {}", normalizedEmail);
 
-        try {
-            User user = userRepository.findByEmail(normalizedEmail)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-
-            if (!tokenRedisService.canRequestToken(user.getId(), "reset")) {
-                return AuthResponseDTO.error("Demasiadas solicitudes. Intenta en 1 hora");
-            }
-
-            String newResetCode = tokenRedisService.generateAndStoreResetCode(user.getId());
-            log.info("Nuevo código de reseteo generado para usuario: {}", normalizedEmail);
-
-            try {
-                emailService.sendPasswordResetEmail(user, newResetCode);
-                log.info("Nuevo email de reseteo enviado a: {}", normalizedEmail);
-            } catch (Exception e) {
-                log.error("Error enviando nuevo email de reseteo a {}: {}",
-                        user.getEmail(), e.getMessage());
-                return AuthResponseDTO.error("Error enviando el email de reseteo");
-            }
-
-            return AuthResponseDTO.success("Nuevo código de reseteo enviado. Revisa tu email.");
-
-        } catch (UsernameNotFoundException e) {
-            log.warn("Intento de reenvío con email no registrado: {}", normalizedEmail);
-            return AuthResponseDTO.error("Usuario no encontrado");
-        } catch (Exception e) {
-            log.error("Error en reenvío para email: {}, error: {}", normalizedEmail, e.getMessage());
-            return AuthResponseDTO.error("Error interno del servidor");
-        }
+        User user = findUserByEmailOrThrow(normalizedEmail);
+        checkRateLimitOrThrow(user.getId(), "reset");
+        
+        String newResetCode = tokenRedisService.generateAndStoreResetCode(user.getId());
+        log.info("Nuevo código de reseteo generado para usuario: {}", normalizedEmail);
+        
+        sendPasswordResetEmailOrThrow(user, newResetCode);
+        log.info("Nuevo email de reseteo enviado a: {}", normalizedEmail);
+        
+        return AuthResponseDTO.success("Nuevo código de reseteo enviado. Revisa tu email.");
     }
 
     // ============================================================================
     // GESTIÓN DE CONTRASEÑA Y EMAIL
     // ============================================================================
 
+    /**
+     * Obtiene el usuario autenticado actual
+     * 
+     * @throws UserNotFoundException si el usuario no está autenticado o no existe
+     */
+    private User getAuthenticatedUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new UserNotFoundException("Usuario no autenticado");
+        }
+        
+        String username = authentication.getName();
+        return findUserByEmailOrThrow(username);
+    }
+    
+    /**
+     * Valida el cambio de contraseña
+     * 
+     * @throws PasswordMismatchException si las contraseñas no coinciden
+     * @throws InvalidCredentialsException si la contraseña actual es incorrecta
+     * @throws WeakPasswordException si la nueva contraseña no cumple los requisitos
+     * @throws AccountDisabledException si la cuenta está deshabilitada
+     */
+    private void validatePasswordChange(ChangePasswordDTO dto, User user) {
+        if (!dto.isPasswordConfirmationValid()) {
+            throw new PasswordMismatchException("Las contraseñas no coinciden");
+        }
+        
+        if (!passwordEncoder.matches(dto.currentPassword(), user.getPassword())) {
+            log.warn("Intento de cambio de contraseña con contraseña actual incorrecta para: {}", user.getEmail());
+            throw new InvalidCredentialsException("Contraseña actual incorrecta");
+        }
+        
+        if (passwordEncoder.matches(dto.newPassword(), user.getPassword())) {
+            throw new WeakPasswordException("La nueva contraseña debe ser diferente a la actual");
+        }
+        
+        if (dto.newPassword().length() < 8) {
+            throw new WeakPasswordException("La nueva contraseña debe tener al menos 8 caracteres");
+        }
+        
+        if (!user.isEnabled()) {
+            throw new AccountDisabledException("Cuenta deshabilitada");
+        }
+    }
+    
+    /**
+     * Actualiza la contraseña del usuario
+     */
+    private void updateUserPassword(User user, String newPassword) {
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordChangedAt(LocalDateTime.now());
+        userRepository.save(user);
+    }
+    
+    /**
+     * Cierra todas las sesiones del usuario de forma segura
+     */
+    private void closeAllUserSessionsSafely(Long userId, String email) {
+        try {
+            jwtSessionService.closeAllUserSessions(userId);
+            log.info("Todas las sesiones revocadas después de cambio de contraseña para: {}", email);
+        } catch (Exception e) {
+            log.warn("Error revocando sesiones después de cambio de contraseña: {}", e.getMessage());
+        }
+    }
+    
+    /**
+     * Envía email de confirmación de cambio de contraseña sin lanzar excepción
+     */
+    private void sendPasswordChangedEmailSafely(User user) {
+        try {
+            emailService.sendPasswordChangedConfirmationEmail(user);
+            log.info("Email de confirmación de cambio de contraseña enviado a: {}", user.getEmail());
+        } catch (Exception e) {
+            log.warn("Error enviando email de confirmación de cambio de contraseña: {}", e.getMessage());
+        }
+    }
+    
+    /**
+     * Valida la solicitud de cambio de email
+     * 
+     * @throws EmailMismatchException si los emails no coinciden
+     * @throws InvalidInputException si el nuevo email es igual al actual
+     * @throws InvalidCredentialsException si la contraseña es incorrecta
+     * @throws EmailAlreadyExistsException si el email ya está en uso
+     */
+    private void validateEmailChangeRequest(RequestEmailChangeDTO dto, User user, String newEmail, String currentEmail) {
+        if (!dto.emailsMatch()) {
+            throw new EmailMismatchException("Los correos electrónicos no coinciden");
+        }
+        
+        if (newEmail.equals(currentEmail.toLowerCase())) {
+            throw new InvalidInputException("El nuevo email debe ser diferente al actual");
+        }
+        
+        if (!passwordEncoder.matches(dto.currentPassword(), user.getPassword())) {
+            log.warn("Intento de cambio de email con contraseña incorrecta para: {}", currentEmail);
+            throw new InvalidCredentialsException("Contraseña incorrecta");
+        }
+        
+        if (userRepository.existsByEmail(newEmail)) {
+            throw new EmailAlreadyExistsException("El email ya está en uso");
+        }
+    }
+    
+    /**
+     * Genera y envía código de cambio de email
+     * 
+     * @throws EmailServiceException si hay error al enviar el email
+     */
+    private String generateAndSendEmailChangeCode(User user, String newEmail, String currentEmail) {
+        String verificationCode = tokenRedisService.generateAndStoreEmailChangeCode(user.getId(), newEmail);
+        
+        try {
+            emailService.sendEmailChangeVerificationCode(newEmail, user.getName(), verificationCode);
+            log.info("Código de verificación enviado al NUEVO email: {} para usuario: {}", newEmail, currentEmail);
+            return verificationCode;
+        } catch (Exception e) {
+            log.error("Error enviando código de verificación al nuevo email: {}", e.getMessage(), e);
+            tokenRedisService.cancelEmailChange(user.getId());
+            throw new EmailServiceException("Error enviando el código de verificación", e);
+        }
+    }
+    
+    /**
+     * Envía notificación de cambio de email sin lanzar excepción
+     */
+    private void sendEmailChangeNotificationSafely(String currentEmail, String newEmail) {
+        try {
+            emailService.sendEmailChangeRequestNotification(currentEmail, newEmail);
+            log.info("Notificación de cambio de email enviada al email actual: {}", currentEmail);
+        } catch (Exception e) {
+            log.warn("Error enviando notificación al email actual: {}", e.getMessage());
+        }
+    }
+    
+    /**
+     * Verifica el código de cambio de email y lo consume
+     * 
+     * @throws InvalidVerificationCodeException si el código es inválido o expirado
+     */
+    private String verifyEmailChangeCodeOrThrow(Long userId, String verificationCode, String currentEmail) {
+        String newEmail = tokenRedisService.verifyAndConsumeEmailChangeCode(userId, verificationCode);
+        
+        if (newEmail == null) {
+            log.warn("Código de cambio de email inválido o expirado para usuario: {}", currentEmail);
+            throw new InvalidVerificationCodeException("Código de verificación incorrecto o expirado");
+        }
+        
+        return newEmail;
+    }
+    
+    /**
+     * Actualiza el email del usuario
+     * 
+     * @return el email anterior
+     */
+    private String updateUserEmail(User user, String newEmail) {
+        String oldEmail = user.getEmail();
+        user.setEmail(newEmail);
+        user.setEmailVerified(true);
+        userRepository.save(user);
+        return oldEmail;
+    }
+    
+    /**
+     * Envía notificación de email cambiado sin lanzar excepción
+     */
+    private void sendEmailChangedNotificationSafely(String oldEmail, String newEmail) {
+        try {
+            emailService.sendEmailChangedNotification(oldEmail, newEmail);
+            log.info("Notificación de email cambiado enviada al email anterior: {}", oldEmail);
+        } catch (Exception e) {
+            log.warn("Error enviando notificación al email anterior: {}", e.getMessage());
+        }
+    }
+
     @Override
     @Transactional
     public AuthResponseDTO changePassword(ChangePasswordDTO changePasswordDTO) {
         log.info("Procesando cambio de contraseña");
 
-        try {
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication == null || !authentication.isAuthenticated()) {
-                return AuthResponseDTO.error("Usuario no autenticado");
-            }
+        User user = getAuthenticatedUser();
+        
+        validatePasswordChange(changePasswordDTO, user);
+        checkAccountLockout(user, user.getEmail());
+        
+        updateUserPassword(user, changePasswordDTO.newPassword());
+        closeAllUserSessionsSafely(user.getId(), user.getEmail());
+        sendPasswordChangedEmailSafely(user);
 
-            String username = authentication.getName();
-            User user = userRepository.findByEmail(username)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-
-            if (!changePasswordDTO.isPasswordConfirmationValid()) {
-                return AuthResponseDTO.error("Las contraseñas no coinciden");
-            }
-
-            if (!passwordEncoder.matches(changePasswordDTO.currentPassword(), user.getPassword())) {
-                log.warn("Intento de cambio de contraseña con contraseña actual incorrecta para: {}", username);
-                return AuthResponseDTO.error("Contraseña actual incorrecta");
-            }
-
-            if (passwordEncoder.matches(changePasswordDTO.newPassword(), user.getPassword())) {
-                return AuthResponseDTO.error("La nueva contraseña debe ser diferente a la actual");
-            }
-
-            if (changePasswordDTO.newPassword().length() < 8) {
-                return AuthResponseDTO.error("La nueva contraseña debe tener al menos 8 caracteres");
-            }
-
-            if (!user.isEnabled()) {
-                return AuthResponseDTO.error("Cuenta deshabilitada");
-            }
-
-            // Verificar bloqueo en Redis
-            if (accountLockoutRedisService.isAccountLocked(user.getId())) {
-                Duration remainingTime = accountLockoutRedisService.getRemainingLockoutTime(user.getId());
-                return AuthResponseDTO.error(
-                        String.format("Cuenta bloqueada temporalmente. Intenta nuevamente en %d minutos",
-                                remainingTime.toMinutes()));
-            }
-
-            user.setPassword(passwordEncoder.encode(changePasswordDTO.newPassword()));
-            user.setPasswordChangedAt(LocalDateTime.now());
-
-            userRepository.save(user);
-
-            log.info("Contraseña cambiada exitosamente para usuario: {}", user.getEmail());
-
-            try {
-                jwtSessionService.closeAllUserSessions(user.getId());
-                log.info("TODAS las sesiones revocadas después de cambio de contraseña para: {}", username);
-            } catch (Exception e) {
-                log.warn("Error revocando sesiones después de cambio de contraseña: {}", e.getMessage());
-            }
-
-            try {
-                emailService.sendPasswordChangedConfirmationEmail(user);
-            } catch (Exception e) {
-                log.warn("Error enviando email de confirmación: {}", e.getMessage());
-            }
-
-            return AuthResponseDTO.success(
-                    "Contraseña cambiada exitosamente. Por seguridad, todas tus sesiones activas han sido cerradas.");
-
-        } catch (UsernameNotFoundException e) {
-            log.error("Usuario no encontrado al cambiar contraseña: {}", e.getMessage());
-            return AuthResponseDTO.error("Usuario no encontrado");
-        } catch (Exception e) {
-            log.error("Error inesperado al cambiar contraseña: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error interno del servidor");
-        }
+        log.info("Contraseña cambiada exitosamente para usuario: {}", user.getEmail());
+        
+        return AuthResponseDTO.success(
+                "Contraseña cambiada exitosamente. Por seguridad, todas tus sesiones activas han sido cerradas.");
     }
 
     /**
@@ -918,73 +1003,19 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO requestEmailChange(RequestEmailChangeDTO requestEmailChangeDTO) {
         log.info("Procesando solicitud de cambio de email (Paso 1/2)");
 
-        try {
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication == null || !authentication.isAuthenticated()) {
-                return AuthResponseDTO.error("Usuario no autenticado");
-            }
-
-            String currentEmail = authentication.getName();
-            User user = userRepository.findByEmail(currentEmail)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-
-            // Validaciones
-            String newEmail = requestEmailChangeDTO.newEmail().toLowerCase().trim();
-
-            if (!requestEmailChangeDTO.emailsMatch()) {
-                return AuthResponseDTO.error("Los correos electrónicos no coinciden");
-            }
-
-            if (newEmail.equals(currentEmail.toLowerCase())) {
-                return AuthResponseDTO.error("El nuevo email debe ser diferente al actual");
-            }
-
-            if (!passwordEncoder.matches(requestEmailChangeDTO.currentPassword(), user.getPassword())) {
-                log.warn("Intento de cambio de email con contraseña incorrecta para: {}", currentEmail);
-                return AuthResponseDTO.error("Contraseña incorrecta");
-            }
-
-            if (userRepository.existsByEmail(newEmail)) {
-                return AuthResponseDTO.error("El email ya está en uso");
-            }
-
-            // Verificar rate limiting
-            if (!tokenRedisService.canRequestToken(user.getId(), "email_change")) {
-                return AuthResponseDTO.error("Demasiadas solicitudes. Intenta en 1 hora");
-            }
-
-            // Generar código y enviarlo al NUEVO email (no al actual)
-            String verificationCode = tokenRedisService.generateAndStoreEmailChangeCode(user.getId(), newEmail);
-
-            try {
-                // IMPORTANTE: Enviar al NUEVO email para verificar que el usuario tiene acceso
-                emailService.sendEmailChangeVerificationCode(newEmail, user.getName(), verificationCode);
-                log.info("Código de verificación enviado al NUEVO email: {} para usuario: {}",
-                        newEmail, currentEmail);
-            } catch (Exception e) {
-                log.error("Error enviando código de verificación al nuevo email: {}", e.getMessage());
-                tokenRedisService.cancelEmailChange(user.getId());
-                return AuthResponseDTO.error("Error enviando el código de verificación");
-            }
-
-            // Notificar al email actual sobre la solicitud
-            try {
-                emailService.sendEmailChangeRequestNotification(currentEmail, newEmail);
-            } catch (Exception e) {
-                log.warn("Error enviando notificación al email actual: {}", e.getMessage());
-            }
-
-            return AuthResponseDTO.success(
-                    "Código de verificación enviado a " + maskEmail(newEmail) +
-                            ". Verifica tu nuevo email e ingresa el código para confirmar el cambio.");
-
-        } catch (UsernameNotFoundException e) {
-            log.error("Usuario no encontrado al solicitar cambio de email: {}", e.getMessage());
-            return AuthResponseDTO.error("Usuario no encontrado");
-        } catch (Exception e) {
-            log.error("Error inesperado al solicitar cambio de email: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error interno del servidor");
-        }
+        User user = getAuthenticatedUser();
+        String currentEmail = user.getEmail();
+        String newEmail = normalizeEmail(requestEmailChangeDTO.newEmail());
+        
+        validateEmailChangeRequest(requestEmailChangeDTO, user, newEmail, currentEmail);
+        checkRateLimitOrThrow(user.getId(), "email_change");
+        
+        generateAndSendEmailChangeCode(user, newEmail, currentEmail);
+        sendEmailChangeNotificationSafely(currentEmail, newEmail);
+        
+        return AuthResponseDTO.success(
+                "Código de verificación enviado a " + maskEmail(newEmail) +
+                        ". Verifica tu nuevo email e ingresa el código para confirmar el cambio.");
     }
 
     /**
@@ -996,68 +1027,22 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO verifyEmailChange(VerifyEmailChangeDTO verifyEmailChangeDTO) {
         log.info("Procesando verificación de cambio de email (Paso 2/2)");
 
-        try {
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication == null || !authentication.isAuthenticated()) {
-                return AuthResponseDTO.error("Usuario no autenticado");
-            }
-
-            String currentEmail = authentication.getName();
-            User user = userRepository.findByEmail(currentEmail)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-
-            // Verificar y consumir código
-            String newEmail = tokenRedisService.verifyAndConsumeEmailChangeCode(
-                    user.getId(),
-                    verifyEmailChangeDTO.verificationCode());
-
-            if (newEmail == null) {
-                log.warn("Código de cambio de email inválido o expirado para usuario: {}", currentEmail);
-                return AuthResponseDTO.error("Código de verificación incorrecto o expirado");
-            }
-
-            // Verificar nuevamente que el email no esté en uso (por si acaso)
-            if (userRepository.existsByEmail(newEmail)) {
-                log.error("El email {} ya está en uso al momento de confirmar cambio", newEmail);
-                return AuthResponseDTO.error("El email ya está en uso");
-            }
-
-            // Cambiar el email
-            String oldEmail = user.getEmail();
-            user.setEmail(newEmail);
-            user.setEmailVerified(true); // Ya verificamos que tiene acceso al nuevo email
-
-            userRepository.save(user);
-
-            log.info("Email cambiado exitosamente de {} a {} para usuario ID: {}",
-                    oldEmail, newEmail, user.getId());
-
-            // Notificar al email anterior
-            try {
-                emailService.sendEmailChangedNotification(oldEmail, newEmail);
-            } catch (Exception e) {
-                log.warn("Error enviando notificación al email anterior: {}", e.getMessage());
-            }
-
-            // Cerrar todas las sesiones por seguridad
-            try {
-                jwtSessionService.closeAllUserSessions(user.getId());
-                log.info("Todas las sesiones cerradas después de cambio de email para seguridad");
-            } catch (Exception e) {
-                log.warn("Error cerrando sesiones después de cambio de email: {}", e.getMessage());
-            }
-
-            return AuthResponseDTO.success(
-                    "Email cambiado exitosamente a " + newEmail +
-                            ". Por seguridad, todas tus sesiones han sido cerradas. Inicia sesión nuevamente.");
-
-        } catch (UsernameNotFoundException e) {
-            log.error("Usuario no encontrado al verificar cambio de email: {}", e.getMessage());
-            return AuthResponseDTO.error("Usuario no encontrado");
-        } catch (Exception e) {
-            log.error("Error inesperado al verificar cambio de email: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error interno del servidor");
-        }
+        User user = getAuthenticatedUser();
+        String currentEmail = user.getEmail();
+        
+        String newEmail = verifyEmailChangeCodeOrThrow(user.getId(), verifyEmailChangeDTO.verificationCode(), currentEmail);
+        validateEmailNotExists(newEmail);
+        
+        String oldEmail = updateUserEmail(user, newEmail);
+        
+        sendEmailChangedNotificationSafely(oldEmail, newEmail);
+        closeAllUserSessionsSafely(user.getId(), user.getEmail());
+        
+        log.info("Email cambiado exitosamente de {} a {} para usuario ID: {}", oldEmail, newEmail, user.getId());
+        
+        return AuthResponseDTO.success(
+                "Email cambiado exitosamente a " + newEmail +
+                        ". Por seguridad, todas tus sesiones han sido cerradas. Inicia sesión nuevamente.");
     }
 
     /**
@@ -1084,82 +1069,74 @@ public class AuthServiceImpl implements AuthService {
     // GESTIÓN DE PERFIL
     // ============================================================================
 
+    /**
+     * Valida los datos de actualización de perfil
+     * 
+     * @throws InvalidInputException si los datos son inválidos
+     */
+    private void validateUserProfileUpdate(UpdateUserProfileDTO dto) {
+        if (dto.name() == null || dto.name().trim().isEmpty()) {
+            throw new InvalidInputException("El nombre es requerido");
+        }
+        
+        if (dto.lastName() == null || dto.lastName().trim().isEmpty()) {
+            throw new InvalidInputException("El apellido es requerido");
+        }
+    }
+
+    /**
+     * Aplica los cambios al perfil del usuario
+     * 
+     * @return true si hubo cambios, false si no
+     */
+    private boolean applyUserProfileChanges(User user, UpdateUserProfileDTO dto) {
+        boolean hasChanges = false;
+        
+        if (!user.getName().equals(dto.name())) {
+            user.setName(dto.name().trim());
+            hasChanges = true;
+        }
+        
+        if (!user.getLastName().equals(dto.lastName())) {
+            user.setLastName(dto.lastName().trim());
+            hasChanges = true;
+        }
+        
+        if (dto.phoneNumber() != null && !dto.phoneNumber().equals(user.getPhoneNumber())) {
+            user.setPhoneNumber(dto.phoneNumber().trim());
+            user.setPhoneVerified(false);
+            hasChanges = true;
+        }
+        
+        return hasChanges;
+    }
+
     @Override
     @Transactional
     public AuthResponseDTO updateUserInfo(UpdateUserProfileDTO updateUserInfoDTO) {
         log.info("Procesando actualización de información de usuario");
 
-        try {
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication == null || !authentication.isAuthenticated()) {
-                return AuthResponseDTO.error("Usuario no autenticado");
-            }
-
-            String username = authentication.getName();
-            User user = userRepository.findByEmail(username)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-
-            if (updateUserInfoDTO.name() == null || updateUserInfoDTO.name().trim().isEmpty()) {
-                return AuthResponseDTO.error("El nombre es requerido");
-            }
-
-            if (updateUserInfoDTO.lastName() == null || updateUserInfoDTO.lastName().trim().isEmpty()) {
-                return AuthResponseDTO.error("El apellido es requerido");
-            }
-
-            boolean hasChanges = false;
-
-            if (!user.getName().equals(updateUserInfoDTO.name())) {
-                user.setName(updateUserInfoDTO.name().trim());
-                hasChanges = true;
-            }
-
-            if (!user.getLastName().equals(updateUserInfoDTO.lastName())) {
-                user.setLastName(updateUserInfoDTO.lastName().trim());
-                hasChanges = true;
-            }
-
-            if (updateUserInfoDTO.phoneNumber() != null &&
-                    !updateUserInfoDTO.phoneNumber().equals(user.getPhoneNumber())) {
-                user.setPhoneNumber(updateUserInfoDTO.phoneNumber().trim());
-                user.setPhoneVerified(false);
-                hasChanges = true;
-            }
-
-            if (!hasChanges) {
-                return AuthResponseDTO.success("No hay cambios para actualizar");
-            }
-
-            userRepository.save(user);
-
-            log.info("Información actualizada exitosamente para usuario: {}", user.getEmail());
-
-            UserInfoDTO updatedInfo = UserInfoDTO.fromUser(user);
-
-            return AuthResponseDTO.successWithUserInfo("Información actualizada exitosamente", updatedInfo);
-
-        } catch (UsernameNotFoundException e) {
-            log.error("Usuario no encontrado al actualizar información: {}", e.getMessage());
-            return AuthResponseDTO.error("Usuario no encontrado");
-        } catch (Exception e) {
-            log.error("Error inesperado al actualizar información: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error interno del servidor");
+        User user = getAuthenticatedUser();
+        
+        validateUserProfileUpdate(updateUserInfoDTO);
+        
+        boolean hasChanges = applyUserProfileChanges(user, updateUserInfoDTO);
+        
+        if (!hasChanges) {
+            return AuthResponseDTO.success("No hay cambios para actualizar");
         }
+        
+        userRepository.save(user);
+        log.info("Información actualizada exitosamente para usuario: {}", user.getEmail());
+        
+        UserInfoDTO updatedInfo = UserInfoDTO.fromUser(user);
+        return AuthResponseDTO.successWithUserInfo("Información actualizada exitosamente", updatedInfo);
     }
 
     @Override
     @Transactional(readOnly = true)
     public UserInfoDTO getCurrentUserInfo() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-
-        if (authentication == null || !authentication.isAuthenticated()) {
-            throw new RuntimeException("Usuario no autenticado");
-        }
-
-        String email = authentication.getName();
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-
+        User user = getAuthenticatedUser();
         return UserInfoDTO.fromUser(user);
     }
 
@@ -1201,55 +1178,70 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponseDTO refreshToken(RefreshTokenDTO refreshTokenDTO) {
-        try {
-            String refreshToken = refreshTokenDTO.refreshToken();
-
-            if (refreshToken == null || refreshToken.trim().isEmpty()) {
-                log.warn("Intento de refresh con token vacío");
-                return AuthResponseDTO.error("Refresh token no proporcionado");
-            }
-
-            JwtSessionService.SessionTokens newTokens = jwtSessionService.refreshAccessToken(refreshToken);
-
-            String accessToken = newTokens.getAccessToken();
-            String username = jwtUtil.extractUsername(accessToken);
-
-            if (username == null) {
-                log.warn("No se pudo extraer username del access token renovado");
-                return AuthResponseDTO.error("Error al renovar tokens");
-            }
-
-            User user = userRepository.findByEmail(username)
-                    .orElseThrow(() -> new RuntimeException("Usuario no encontrado: " + username));
-
-            if (!user.isEnabled()) {
-                log.warn("Intento de refresh token con usuario inactivo: {}", user.getEmail());
-                return AuthResponseDTO.error("Usuario inactivo");
-            }
-
-            // Verificar bloqueo en Redis
-            if (accountLockoutRedisService.isAccountLocked(user.getId())) {
-                log.warn("Intento de refresh token con cuenta bloqueada: {}", user.getEmail());
-                return AuthResponseDTO.error("Cuenta bloqueada");
-            }
-
-            UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
-
-            log.info("Tokens renovados exitosamente para usuario: {} - SessionId: {}",
-                    user.getEmail(), newTokens.getSessionId());
-
-            return AuthResponseDTO.success(
-                    newTokens.getAccessToken(),
-                    newTokens.getRefreshToken(),
-                    newTokens.getExpiresIn() * 1000,
-                    userInfo);
-
-        } catch (RuntimeException e) {
-            log.warn("Error en refresh token: {}", e.getMessage());
-            return AuthResponseDTO.error(e.getMessage());
-        } catch (Exception e) {
-            log.error("Error inesperado en refresh token: {}", e.getMessage(), e);
-            return AuthResponseDTO.error("Error al renovar tokens");
+        String refreshToken = validateRefreshTokenOrThrow(refreshTokenDTO.refreshToken());
+        
+        JwtSessionService.SessionTokens newTokens = jwtSessionService.refreshAccessToken(refreshToken);
+        String username = extractUsernameFromTokenOrThrow(newTokens.getAccessToken());
+        
+        User user = findUserByEmailOrThrow(username);
+        validateUserForRefresh(user);
+        
+        UserInfoDTO userInfo = UserInfoDTO.fromUser(user);
+        
+        log.info("Tokens renovados exitosamente para usuario: {} - SessionId: {}",
+                user.getEmail(), newTokens.getSessionId());
+        
+        return AuthResponseDTO.success(
+                newTokens.getAccessToken(),
+                newTokens.getRefreshToken(),
+                newTokens.getExpiresIn() * 1000,
+                userInfo);
+    }
+    
+    /**
+     * Valida el refresh token
+     * 
+     * @throws InvalidRefreshTokenException si el token es inválido o vacío
+     */
+    private String validateRefreshTokenOrThrow(String refreshToken) {
+        if (refreshToken == null || refreshToken.trim().isEmpty()) {
+            log.warn("Intento de refresh con token vacío");
+            throw new InvalidRefreshTokenException("Refresh token no proporcionado");
+        }
+        return refreshToken;
+    }
+    
+    /**
+     * Extrae el username del token
+     * 
+     * @throws InvalidTokenException si no se puede extraer el username
+     */
+    private String extractUsernameFromTokenOrThrow(String accessToken) {
+        String username = jwtUtil.extractUsername(accessToken);
+        
+        if (username == null) {
+            log.warn("No se pudo extraer username del access token renovado");
+            throw new InvalidTokenException("Error al renovar tokens");
+        }
+        
+        return username;
+    }
+    
+    /**
+     * Valida que el usuario esté activo y no bloqueado para refresh
+     * 
+     * @throws AccountDisabledException si el usuario está inactivo
+     * @throws AccountLockedException si la cuenta está bloqueada
+     */
+    private void validateUserForRefresh(User user) {
+        if (!user.isEnabled()) {
+            log.warn("Intento de refresh token con usuario inactivo: {}", user.getEmail());
+            throw new AccountDisabledException("Usuario inactivo");
+        }
+        
+        if (accountLockoutRedisService.isAccountLocked(user.getId())) {
+            log.warn("Intento de refresh token con cuenta bloqueada: {}", user.getEmail());
+            throw new AccountLockedException("Cuenta bloqueada", 0);
         }
     }
 
@@ -1257,9 +1249,6 @@ public class AuthServiceImpl implements AuthService {
     // MÉTODOS AUXILIARES PRIVADOS
     // ============================================================================
 
-    /**
-     * Crea una sesión completa para el usuario
-     */
     /**
      * Crea una sesión completa para el usuario
      */
